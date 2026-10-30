@@ -1,0 +1,101 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/newrelic/go-agent/v3/integrations/nrredis-v9"
+	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
+	"github.com/anjal-niraula/engage-engine/internal/platform/config"
+	loggerPkg "github.com/anjal-niraula/engage-engine/internal/platform/logger"
+	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
+)
+
+type Server struct {
+	Config        *config.Config
+	Logger        *zerolog.Logger
+	LoggerService *loggerPkg.LoggerService
+	DB            *postgres.Database
+	Redis         *redis.Client
+	httpServer    *http.Server
+}
+
+func New(cfg *config.Config, logger *zerolog.Logger, loggerService *loggerPkg.LoggerService) (*Server, error) {
+	db, err := postgres.New(cfg, logger, loggerService)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to initialize database, continuing without active DB pool")
+	}
+
+	// Redis client with New Relic integration
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: cfg.Redis.Address,
+	})
+
+	if loggerService != nil && loggerService.GetApplication() != nil {
+		redisClient.AddHook(nrredis.NewHook(redisClient.Options()))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		logger.Warn().Err(err).Msg("Failed to connect to Redis, continuing without active Redis")
+	}
+
+	server := &Server{
+		Config:        cfg,
+		Logger:        logger,
+		LoggerService: loggerService,
+		DB:            db,
+		Redis:         redisClient,
+	}
+
+	return server, nil
+}
+
+func (s *Server) SetupHTTPServer(handler http.Handler) {
+	s.httpServer = &http.Server{
+		Addr:         ":" + s.Config.Server.Port,
+		Handler:      handler,
+		ReadTimeout:  time.Duration(s.Config.Server.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(s.Config.Server.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(s.Config.Server.IdleTimeout) * time.Second,
+	}
+}
+
+func (s *Server) Start() error {
+	if s.httpServer == nil {
+		return errors.New("HTTP server not initialized")
+	}
+
+	s.Logger.Info().
+		Str("port", s.Config.Server.Port).
+		Str("env", s.Config.Primary.Env).
+		Msg("starting server")
+
+	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("failed to shutdown HTTP server: %w", err)
+		}
+	}
+
+	if s.DB != nil {
+		if err := s.DB.Close(); err != nil {
+			return fmt.Errorf("failed to close database connection: %w", err)
+		}
+	}
+
+	if s.Redis != nil {
+		_ = s.Redis.Close()
+	}
+
+	return nil
+}

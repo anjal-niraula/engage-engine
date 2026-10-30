@@ -1,0 +1,120 @@
+version: '3'
+
+vars:
+  APP_NAME: engage-engine
+  BIN_DIR: bin
+  API_BIN: '{{.BIN_DIR}}/api'
+  WORKER_BIN: '{{.BIN_DIR}}/worker'
+  API_ENTRY: cmd/api/main.go
+  WORKER_ENTRY: cmd/worker/main.go
+
+dotenv: ['.env', '.env.example']
+
+tasks:
+  default:
+    desc: List all available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  all:
+    desc: Clean, format, vet, test, and build all binaries
+    cmds:
+      - task: clean
+      - task: fmt
+      - task: vet
+      - task: test
+      - task: build
+
+  build:
+    desc: Build all service binaries
+    deps: [build-api, build-worker]
+
+  build-api:
+    desc: Build the API server binary
+    generates:
+      - '{{.API_BIN}}'
+    sources:
+      - 'cmd/api/**/*.go'
+      - 'internal/**/*.go'
+      - 'go.mod'
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -o {{.API_BIN}} {{.API_ENTRY}}
+
+  build-worker:
+    desc: Build the worker service binary
+    generates:
+      - '{{.WORKER_BIN}}'
+    sources:
+      - 'cmd/worker/**/*.go'
+      - 'internal/**/*.go'
+      - 'go.mod'
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -o {{.WORKER_BIN}} {{.WORKER_ENTRY}}
+
+  run-api:
+    desc: Run the HTTP API server directly
+    cmds:
+      - go run {{.API_ENTRY}}
+
+  run-worker:
+    desc: Run the background worker service directly
+    cmds:
+      - go run {{.WORKER_ENTRY}}
+
+  test:
+    desc: Run unit tests with race detection
+    cmds:
+      - go test -v -race ./...
+
+  test-coverage:
+    desc: Run unit tests and generate HTML coverage report
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go test -v -race -coverprofile={{.BIN_DIR}}/coverage.out ./...
+      - go tool cover -html={{.BIN_DIR}}/coverage.out -o {{.BIN_DIR}}/coverage.html
+      - echo "Coverage report generated at {{.BIN_DIR}}/coverage.html"
+
+  fmt:
+    desc: Format all Go source files
+    cmds:
+      - go fmt ./...
+
+  vet:
+    desc: Run go vet static analysis
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run
+    ignore_error: true
+
+  clean:
+    desc: Clean build artifacts and coverage files
+    cmds:
+      - rm -rf {{.BIN_DIR}}
+
+  docker-build:
+    desc: Build Docker images for API and worker
+    cmds:
+      - docker build -f deployments/docker/Dockerfile.api -t {{.APP_NAME}}-api:latest .
+      - docker build -f deployments/docker/Dockerfile.worker -t {{.APP_NAME}}-worker:latest .
+
+  docker-up:
+    desc: Start infrastructure and services with docker-compose
+    cmds:
+      - docker compose -f deployments/docker-compose.yml up -d
+
+  docker-down:
+    desc: Stop and remove docker-compose containers
+    cmds:
+      - docker compose -f deployments/docker-compose.yml down
+
+  setup:
+    desc: Run development environment setup script
+    cmds:
+      - ./scripts/setup.sh

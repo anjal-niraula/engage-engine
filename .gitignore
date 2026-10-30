@@ -1,0 +1,31 @@
+# Binaries & build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dist/
+.task/
+
+# Test artifacts & coverage
+*.out
+*.test
+coverage.html
+
+# Environment files
+.env
+.env.local
+*.env
+
+# IDE / Editor configuration
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
