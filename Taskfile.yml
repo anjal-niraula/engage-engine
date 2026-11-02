@@ -114,6 +114,26 @@ tasks:
     cmds:
       - docker compose -f deployments/docker-compose.yml down
 
+  infra-up:
+    desc: Start infrastructure containers (PostgreSQL, Redis, Kafka)
+    cmds:
+      - docker compose -f deployments/docker-compose.yml up -d postgres redis kafka
+
+  infra-down:
+    desc: Stop infrastructure containers
+    cmds:
+      - docker compose -f deployments/docker-compose.yml stop postgres redis kafka
+
+  infra-status:
+    desc: Show status of infrastructure containers
+    cmds:
+      - docker compose -f deployments/docker-compose.yml ps postgres redis kafka
+
+  infra-logs:
+    desc: Tail logs of infrastructure containers
+    cmds:
+      - docker compose -f deployments/docker-compose.yml logs -f postgres redis kafka
+
   setup:
     desc: Run development environment setup script
     cmds:

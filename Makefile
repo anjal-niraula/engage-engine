@@ -80,3 +80,19 @@ docker-up: ## Start infrastructure and services with docker-compose
 docker-down: ## Stop and remove docker-compose containers
 	docker compose -f deployments/docker-compose.yml down
 
+.PHONY: infra-up
+infra-up: ## Start infrastructure containers (PostgreSQL, Redis, Kafka)
+	docker compose -f deployments/docker-compose.yml up -d postgres redis kafka
+
+.PHONY: infra-down
+infra-down: ## Stop infrastructure containers
+	docker compose -f deployments/docker-compose.yml stop postgres redis kafka
+
+.PHONY: infra-status
+infra-status: ## Show status of infrastructure containers
+	docker compose -f deployments/docker-compose.yml ps postgres redis kafka
+
+.PHONY: infra-logs
+infra-logs: ## Tail logs of infrastructure containers
+	docker compose -f deployments/docker-compose.yml logs -f postgres redis kafka
+

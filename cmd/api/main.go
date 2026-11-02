@@ -10,7 +10,12 @@ import (
 
 	"github.com/anjal-niraula/engage-engine/internal/platform/config"
 	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
+	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
 	"github.com/anjal-niraula/engage-engine/internal/platform/server"
+	userHandler "github.com/anjal-niraula/engage-engine/internal/modules/user/handler"
+	userRepo "github.com/anjal-niraula/engage-engine/internal/modules/user/repository"
+	userUsecase "github.com/anjal-niraula/engage-engine/internal/modules/user/usecase"
+	sharedMw "github.com/anjal-niraula/engage-engine/internal/shared/middleware"
 )
 
 const DefaultContextTimeout = 30
@@ -41,6 +46,27 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	// Setup User Module if database is connected
+	if srv.DB != nil && srv.DB.Pool != nil {
+		if cfg.Primary.Env == "local" || cfg.Primary.Env == "development" {
+			migrationCtx, cancelMigration := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := postgres.Migrate(migrationCtx, &log, cfg); err != nil {
+				log.Warn().Err(err).Msg("database schema migration warning")
+			}
+			cancelMigration()
+		}
+
+		userRepository := userRepo.NewPostgresUserRepository(srv.DB.Pool)
+		userUseCase := userUsecase.NewUserUseCase(userRepository, cfg.Server.JWTSecret, 24*time.Hour)
+		userHTTPHandler := userHandler.NewUserHandler(userUseCase)
+
+		requireAuth := sharedMw.RequireAuth(cfg.Server.JWTSecret)
+		optionalAuth := sharedMw.OptionalAuth(cfg.Server.JWTSecret)
+
+		userHandler.RegisterRoutes(mux, userHTTPHandler, requireAuth, optionalAuth)
+		log.Info().Msg("user module routes registered")
+	}
 
 	srv.SetupHTTPServer(mux)
 

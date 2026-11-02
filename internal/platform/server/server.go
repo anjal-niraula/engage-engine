@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/anjal-niraula/engage-engine/internal/platform/config"
+	kafkaPkg "github.com/anjal-niraula/engage-engine/internal/platform/kafka"
 	loggerPkg "github.com/anjal-niraula/engage-engine/internal/platform/logger"
 	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
 )
@@ -21,6 +22,7 @@ type Server struct {
 	LoggerService *loggerPkg.LoggerService
 	DB            *postgres.Database
 	Redis         *redis.Client
+	Kafka         *kafkaPkg.Client
 	httpServer    *http.Server
 }
 
@@ -46,12 +48,25 @@ func New(cfg *config.Config, logger *zerolog.Logger, loggerService *loggerPkg.Lo
 		logger.Warn().Err(err).Msg("Failed to connect to Redis, continuing without active Redis")
 	}
 
+	// Kafka client initialization
+	kafkaClient, err := kafkaPkg.New(cfg.Kafka, logger)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to initialize kafka client, continuing without active Kafka")
+	} else {
+		ctxPing, cancelPing := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := kafkaClient.Ping(ctxPing); err != nil {
+			logger.Warn().Err(err).Msg("failed to reach Kafka broker, continuing without active Kafka")
+		}
+		cancelPing()
+	}
+
 	server := &Server{
 		Config:        cfg,
 		Logger:        logger,
 		LoggerService: loggerService,
 		DB:            db,
 		Redis:         redisClient,
+		Kafka:         kafkaClient,
 	}
 
 	return server, nil
@@ -95,6 +110,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	if s.Redis != nil {
 		_ = s.Redis.Close()
+	}
+
+	if s.Kafka != nil {
+		if err := s.Kafka.Close(); err != nil {
+			s.Logger.Warn().Err(err).Msg("failed to cleanly close kafka writer")
+		}
 	}
 
 	return nil

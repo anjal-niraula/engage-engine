@@ -34,6 +34,7 @@ type ServerConfig struct {
 	WriteTimeout       int      `koanf:"write_timeout" validate:"required"`
 	IdleTimeout        int      `koanf:"idle_timeout" validate:"required"`
 	CORSAllowedOrigins []string `koanf:"cors_allowed_origins" validate:"required"`
+	JWTSecret          string   `koanf:"jwt_secret"`
 }
 
 type DatabaseConfig struct {
@@ -110,6 +111,10 @@ func LoadConfig() (*Config, error) {
 		mainConfig.Server.WriteTimeout = 30
 		mainConfig.Server.IdleTimeout = 60
 		mainConfig.Server.CORSAllowedOrigins = []string{"*"}
+		mainConfig.Server.JWTSecret = "engage-engine-dev-secret-key-32bytes!"
+	}
+	if mainConfig.Server.JWTSecret == "" {
+		mainConfig.Server.JWTSecret = "engage-engine-dev-secret-key-32bytes!"
 	}
 	if mainConfig.Primary.Env == "" {
 		mainConfig.Primary.Env = "local"
@@ -128,6 +133,15 @@ func LoadConfig() (*Config, error) {
 	}
 	if mainConfig.Redis.Address == "" {
 		mainConfig.Redis.Address = "localhost:6379"
+	}
+	if len(mainConfig.Kafka.Brokers) == 0 {
+		mainConfig.Kafka.Brokers = []string{"localhost:9092"}
+	}
+	if mainConfig.Kafka.GroupID == "" {
+		mainConfig.Kafka.GroupID = "engage-engine"
+	}
+	if mainConfig.Kafka.Topic == "" {
+		mainConfig.Kafka.Topic = "engage.events"
 	}
 
 	validate := validator.New()

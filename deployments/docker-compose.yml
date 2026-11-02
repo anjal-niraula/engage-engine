@@ -21,15 +21,16 @@ services:
     container_name: engage-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${APP_DATABASE__USER:-postgres}
-      POSTGRES_PASSWORD: ${APP_DATABASE__PASSWORD:-postgres}
-      POSTGRES_DB: ${APP_DATABASE__NAME:-engage_engine}
+      POSTGRES_USER: ${ENGAGE_DATABASE_USER:-${APP_DATABASE__USER:-postgres}}
+      POSTGRES_PASSWORD: ${ENGAGE_DATABASE_PASSWORD:-${APP_DATABASE__PASSWORD:-postgres}}
+      POSTGRES_DB: ${ENGAGE_DATABASE_NAME:-${APP_DATABASE__NAME:-engage_engine}}
     ports:
-      - "${APP_DATABASE__PORT:-5432}:5432"
+      - "${ENGAGE_DATABASE_PORT:-${APP_DATABASE__PORT:-5432}}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${APP_DATABASE__USER:-postgres} -d ${APP_DATABASE__NAME:-engage_engine}"]
+      test: ["CMD-SHELL", "pg_isready -U ${ENGAGE_DATABASE_USER:-${APP_DATABASE__USER:-postgres}} -d ${ENGAGE_DATABASE_NAME:-${APP_DATABASE__NAME:-engage_engine}}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -39,7 +40,7 @@ services:
     container_name: engage-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${ENGAGE_REDIS_PORT:-${REDIS_PORT:-6379}}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -57,10 +58,10 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -69,6 +70,12 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     volumes:
       - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # ============================================================================
   # Application Services
