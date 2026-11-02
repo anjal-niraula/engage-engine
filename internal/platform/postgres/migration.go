@@ -64,4 +64,3 @@ func Migrate(ctx context.Context, logger *zerolog.Logger, cfg *config.Config) er
 	}
 	return nil
 }
-

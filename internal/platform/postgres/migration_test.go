@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/anjal-niraula/engage-engine/internal/platform/config"
 	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
+	"github.com/rs/zerolog"
 )
 
 func TestMigrateWithTern(t *testing.T) {
@@ -26,4 +26,3 @@ func TestMigrateWithTern(t *testing.T) {
 		t.Skipf("skipping live database migration test (Postgres might not be running in this env): %v", err)
 	}
 }
-

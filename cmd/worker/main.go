@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/anjal-niraula/engage-engine/internal/platform/config"
 	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
@@ -39,10 +38,6 @@ func main() {
 
 	log.Info().Msg("received shutdown signal: draining background worker tasks...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-
-	<-shutdownCtx.Done()
-
+	// In-flight background consumer draining will coordinate here
 	log.Info().Msg("worker service stopped cleanly")
 }

@@ -69,6 +69,11 @@ tasks:
     cmds:
       - go test -v -race ./...
 
+  test-integration:
+    desc: Run integration tests against running infrastructure (Docker)
+    cmds:
+      - go test -v -race -tags=integration ./tests/integration/...
+
   test-coverage:
     desc: Run unit tests and generate HTML coverage report
     cmds:

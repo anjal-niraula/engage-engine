@@ -6,9 +6,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/anjal-niraula/engage-engine/internal/platform/config"
 	"github.com/rs/zerolog"
 	segmentio "github.com/segmentio/kafka-go"
-	"github.com/anjal-niraula/engage-engine/internal/platform/config"
 )
 
 // Client encapsulates Kafka producer and consumer lifecycle.
@@ -26,9 +26,12 @@ func New(cfg config.KafkaConfig, logger *zerolog.Logger) (*Client, error) {
 
 	writer := &segmentio.Writer{
 		Addr:         segmentio.TCP(cfg.Brokers...),
-		Topic:        cfg.Topic,
 		Balancer:     &segmentio.LeastBytes{},
 		BatchTimeout: 10 * time.Millisecond,
+		RequiredAcks: segmentio.RequireOne,
+		MaxAttempts:  3,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 		Async:        false,
 	}
 
@@ -38,14 +41,20 @@ func New(cfg config.KafkaConfig, logger *zerolog.Logger) (*Client, error) {
 		writer: writer,
 	}
 
-	logger.Info().Strs("brokers", cfg.Brokers).Str("topic", cfg.Topic).Msg("kafka client initialized")
+	logger.Info().Strs("brokers", cfg.Brokers).Str("default_topic", cfg.Topic).Msg("kafka client initialized")
 	return client, nil
 }
 
 // Publish publishes a message with key and value to a specified topic.
+// If topic is empty, the default topic from configuration is used.
 func (c *Client) Publish(ctx context.Context, topic string, key []byte, value []byte) error {
+	targetTopic := topic
+	if targetTopic == "" {
+		targetTopic = c.config.Topic
+	}
+
 	msg := segmentio.Message{
-		Topic: topic,
+		Topic: targetTopic,
 		Key:   key,
 		Value: value,
 		Time:  time.Now(),
@@ -55,15 +64,21 @@ func (c *Client) Publish(ctx context.Context, topic string, key []byte, value []
 
 // NewConsumer creates a segmentio Reader for consuming events from a topic.
 func (c *Client) NewConsumer(topic string, groupID string) *segmentio.Reader {
+	targetTopic := topic
+	if targetTopic == "" {
+		targetTopic = c.config.Topic
+	}
 	if groupID == "" {
 		groupID = c.config.GroupID
 	}
 	return segmentio.NewReader(segmentio.ReaderConfig{
-		Brokers:  c.config.Brokers,
-		Topic:    topic,
-		GroupID:  groupID,
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
+		Brokers:        c.config.Brokers,
+		Topic:          targetTopic,
+		GroupID:        groupID,
+		MinBytes:       10e3, // 10KB
+		MaxBytes:       10e6, // 10MB
+		CommitInterval: 1 * time.Second,
+		StartOffset:    segmentio.LastOffset,
 	})
 }
 

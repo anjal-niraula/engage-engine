@@ -44,6 +44,10 @@ run-worker: ## Run the background worker service directly
 test: ## Run unit tests with race detection
 	go test -v -race ./...
 
+.PHONY: test-integration
+test-integration: ## Run integration tests against running infrastructure (Docker)
+	go test -v -race -tags=integration ./tests/integration/...
+
 .PHONY: test-coverage
 test-coverage: ## Run unit tests and generate coverage report
 	@mkdir -p $(BIN_DIR)

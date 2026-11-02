@@ -2,20 +2,21 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strconv"
 	"time"
 
+	"github.com/anjal-niraula/engage-engine/internal/platform/config"
+	loggerConfig "github.com/anjal-niraula/engage-engine/internal/platform/logger"
 	pgxzero "github.com/jackc/pgx-zerolog"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/newrelic/go-agent/v3/integrations/nrpgx5"
 	"github.com/rs/zerolog"
-	"github.com/anjal-niraula/engage-engine/internal/platform/config"
-	loggerConfig "github.com/anjal-niraula/engage-engine/internal/platform/logger"
 )
 
 type Database struct {
@@ -119,6 +120,47 @@ func New(cfg *config.Config, logger *zerolog.Logger, loggerService *loggerConfig
 	logger.Info().Msg("connected to the database")
 
 	return database, nil
+}
+
+// Ping verifies the database connection is alive.
+func (db *Database) Ping(ctx context.Context) error {
+	if db == nil || db.Pool == nil {
+		return fmt.Errorf("database connection pool is not initialized")
+	}
+	return db.Pool.Ping(ctx)
+}
+
+// WithTx executes a unit of work within a database transaction.
+// It commits on success, and automatically rolls back if fn returns an error or panics.
+func (db *Database) WithTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	if db == nil || db.Pool == nil {
+		return fmt.Errorf("database connection pool is not initialized")
+	}
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(ctx)
+			panic(p)
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			return fmt.Errorf("tx error: %w, rollback error: %v", err, rbErr)
+		}
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (db *Database) Close() error {
