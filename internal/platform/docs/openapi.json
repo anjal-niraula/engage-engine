@@ -1,0 +1,482 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Engage Engine REST API",
+    "description": "Production-grade Instagram-inspired social engagement and analytics engine built with Go, PostgreSQL, Redis, and Kafka.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local Development Server"
+    }
+  ],
+  "tags": [
+    { "name": "Health", "description": "Liveness and service health checks" },
+    { "name": "Auth & Users", "description": "Authentication, profile management, and identity" },
+    { "name": "Posts", "description": "Content publishing, feed timelines, and media grids" },
+    { "name": "Likes", "description": "Idempotent liking and unliking for posts and comments" },
+    { "name": "Follows", "description": "Social graph follower and following relationships" },
+    { "name": "Comments", "description": "Hierarchical threaded discussions and replies" },
+    { "name": "Notifications", "description": "Real-time user engagement activity stream" },
+    { "name": "Views & Analytics", "description": "High-throughput impression tracking and creator insights" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT token obtained from /api/v1/users/login"
+      }
+    },
+    "schemas": {
+      "SuccessEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": { "type": "object" }
+        }
+      },
+      "PaginatedEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": { "type": "array", "items": { "type": "object" } },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "cursor": { "type": "string", "nullable": true, "example": "eyJpZCI6IjAwMDA...In0=" },
+              "has_more": { "type": "boolean", "example": true },
+              "limit": { "type": "integer", "example": 20 }
+            }
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "example": "BAD_REQUEST" },
+          "message": { "type": "string", "example": "Validation failed on input payload" },
+          "status": { "type": "integer", "example": 400 },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": { "type": "string" },
+                "error": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["username", "email", "password", "display_name"],
+        "properties": {
+          "username": { "type": "string", "example": "johndoe", "minLength": 3, "maxLength": 30 },
+          "email": { "type": "string", "format": "email", "example": "john@example.com" },
+          "password": { "type": "string", "example": "Password123!", "minLength": 8, "maxLength": 72 },
+          "display_name": { "type": "string", "example": "John Doe", "minLength": 1, "maxLength": 100 }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["identity", "password"],
+        "properties": {
+          "identity": { "type": "string", "example": "johndoe" },
+          "password": { "type": "string", "example": "Password123!" }
+        }
+      },
+      "UpdateProfileRequest": {
+        "type": "object",
+        "properties": {
+          "display_name": { "type": "string", "example": "John Doe Updated" },
+          "bio": { "type": "string", "example": "Building scalable Go backends" },
+          "avatar_url": { "type": "string", "example": "https://cdn.example.com/avatars/john.jpg" },
+          "website": { "type": "string", "example": "https://johndoe.dev" }
+        }
+      },
+      "CreatePostRequest": {
+        "type": "object",
+        "required": ["media_urls", "media_type"],
+        "properties": {
+          "caption": { "type": "string", "example": "Enjoying the sunset in Santorini! #travel", "maxLength": 2200 },
+          "media_urls": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "example": ["https://cdn.example.com/photos/sunset1.jpg"]
+          },
+          "media_type": { "type": "string", "enum": ["image", "video", "carousel"], "example": "image" },
+          "location": { "type": "string", "example": "Santorini, Greece" }
+        }
+      },
+      "CreateCommentRequest": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": { "type": "string", "example": "Stunning shot! Which camera did you use?", "minLength": 1, "maxLength": 1000 },
+          "parent_id": { "type": "string", "format": "uuid", "nullable": true, "example": null }
+        }
+      },
+      "TrackViewRequest": {
+        "type": "object",
+        "required": ["post_id", "session_id", "duration_ms"],
+        "properties": {
+          "post_id": { "type": "string", "format": "uuid", "example": "a3b8c2d1-0000-4000-8000-111122223333" },
+          "session_id": { "type": "string", "example": "sess_9f823a0b1c2d" },
+          "duration_ms": { "type": "integer", "example": 4200, "minimum": 0 }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Health check",
+        "description": "Liveness endpoint verifying API server is running.",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "status": { "type": "string", "example": "ok" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/register": {
+      "post": {
+        "tags": ["Auth & Users"],
+        "summary": "Register a new user",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "User created successfully", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "400": { "description": "Validation error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "Username or email conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/api/v1/users/login": {
+      "post": {
+        "tags": ["Auth & Users"],
+        "summary": "Authenticate user and issue JWT",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Authenticated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "401": { "description": "Invalid credentials", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "tags": ["Auth & Users"],
+        "summary": "Get authenticated user profile",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "User profile", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "401": { "description": "Unauthorized" }
+        }
+      },
+      "patch": {
+        "tags": ["Auth & Users"],
+        "summary": "Update authenticated user profile",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateProfileRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Profile updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/users/{username}": {
+      "get": {
+        "tags": ["Auth & Users"],
+        "summary": "Get public profile by username",
+        "description": "Optional Bearer token will populate `is_following` boolean badge.",
+        "parameters": [
+          { "name": "username", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Public profile details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "404": { "description": "User not found" }
+        }
+      }
+    },
+    "/api/v1/posts": {
+      "post": {
+        "tags": ["Posts"],
+        "summary": "Create a new post",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatePostRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "Post created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "400": { "description": "Invalid input", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/posts/{id}": {
+      "get": {
+        "tags": ["Posts"],
+        "summary": "Get post by ID",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": { "description": "Post details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } },
+          "404": { "description": "Post not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Posts"],
+        "summary": "Soft delete post (Author only)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "204": { "description": "Post deleted" },
+          "403": { "description": "Forbidden - not the owner" },
+          "404": { "description": "Post not found" }
+        }
+      }
+    },
+    "/api/v1/users/{username}/posts": {
+      "get": {
+        "tags": ["Posts"],
+        "summary": "List user's posts grid",
+        "parameters": [
+          { "name": "username", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Paginated posts", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } }
+        }
+      }
+    },
+    "/api/v1/feed": {
+      "get": {
+        "tags": ["Posts"],
+        "summary": "Personalized chronological feed",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "User feed timeline", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } }
+        }
+      }
+    },
+    "/api/v1/posts/{id}/likes": {
+      "post": {
+        "tags": ["Likes"],
+        "summary": "Like a post (Idempotent)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Post liked" } }
+      },
+      "delete": {
+        "tags": ["Likes"],
+        "summary": "Unlike a post (Idempotent)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Post unliked" } }
+      },
+      "get": {
+        "tags": ["Likes"],
+        "summary": "List users who liked post",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Paginated likers list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } } }
+      }
+    },
+    "/api/v1/comments/{id}/likes": {
+      "post": {
+        "tags": ["Likes"],
+        "summary": "Like a comment (Idempotent)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Comment liked" } }
+      },
+      "delete": {
+        "tags": ["Likes"],
+        "summary": "Unlike a comment (Idempotent)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Comment unliked" } }
+      }
+    },
+    "/api/v1/users/{id}/follow": {
+      "post": {
+        "tags": ["Follows"],
+        "summary": "Follow user (Idempotent)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Followed" } }
+      },
+      "delete": {
+        "tags": ["Follows"],
+        "summary": "Unfollow user (Idempotent)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Unfollowed" } }
+      }
+    },
+    "/api/v1/users/{id}/followers": {
+      "get": {
+        "tags": ["Follows"],
+        "summary": "List user's followers",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Followers list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } } }
+      }
+    },
+    "/api/v1/users/{id}/following": {
+      "get": {
+        "tags": ["Follows"],
+        "summary": "List users followed by user",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Following list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } } }
+      }
+    },
+    "/api/v1/posts/{id}/comments": {
+      "post": {
+        "tags": ["Comments"],
+        "summary": "Add comment to post",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCommentRequest" } } }
+        },
+        "responses": { "201": { "description": "Comment created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } } }
+      },
+      "get": {
+        "tags": ["Comments"],
+        "summary": "List top-level comments on post",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Comments list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } } }
+      }
+    },
+    "/api/v1/comments/{id}/replies": {
+      "get": {
+        "tags": ["Comments"],
+        "summary": "List nested replies for a comment",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Replies list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } } }
+      }
+    },
+    "/api/v1/comments/{id}": {
+      "delete": {
+        "tags": ["Comments"],
+        "summary": "Delete comment (Author or Post Owner)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "204": { "description": "Comment deleted" } }
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": ["Notifications"],
+        "summary": "List user's notifications",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Notifications list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedEnvelope" } } } } }
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "patch": {
+        "tags": ["Notifications"],
+        "summary": "Mark notification as read",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Marked read" } }
+      }
+    },
+    "/api/v1/views": {
+      "post": {
+        "tags": ["Views & Analytics"],
+        "summary": "Track post impression (High-throughput)",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TrackViewRequest" } } }
+        },
+        "responses": {
+          "202": { "description": "View event queued into Redis and Kafka", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } }
+        }
+      }
+    },
+    "/api/v1/posts/{id}/stats": {
+      "get": {
+        "tags": ["Views & Analytics"],
+        "summary": "Real-time post engagement stats",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Real-time engagement metrics", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } } }
+      }
+    },
+    "/api/v1/posts/{id}/analytics": {
+      "get": {
+        "tags": ["Views & Analytics"],
+        "summary": "Post author deep analytics",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Detailed post metrics", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } } }
+      }
+    },
+    "/api/v1/users/me/analytics": {
+      "get": {
+        "tags": ["Views & Analytics"],
+        "summary": "Creator overall performance analytics",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "range", "in": "query", "schema": { "type": "string", "enum": ["7d", "30d", "90d"], "default": "30d" } }
+        ],
+        "responses": { "200": { "description": "Creator overview performance", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" } } } } }
+      }
+    }
+  }
+}
+

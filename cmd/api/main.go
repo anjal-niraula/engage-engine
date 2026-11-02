@@ -6,15 +6,35 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/anjal-niraula/engage-engine/internal/platform/config"
-	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
-	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
-	"github.com/anjal-niraula/engage-engine/internal/platform/server"
+	analyticsHandler "github.com/anjal-niraula/engage-engine/internal/modules/analytics/handler"
+	analyticsRepo "github.com/anjal-niraula/engage-engine/internal/modules/analytics/repository"
+	analyticsUsecase "github.com/anjal-niraula/engage-engine/internal/modules/analytics/usecase"
+	commentHandler "github.com/anjal-niraula/engage-engine/internal/modules/comment/handler"
+	commentRepo "github.com/anjal-niraula/engage-engine/internal/modules/comment/repository"
+	commentUsecase "github.com/anjal-niraula/engage-engine/internal/modules/comment/usecase"
+	followHandler "github.com/anjal-niraula/engage-engine/internal/modules/follow/handler"
+	followRepo "github.com/anjal-niraula/engage-engine/internal/modules/follow/repository"
+	followUsecase "github.com/anjal-niraula/engage-engine/internal/modules/follow/usecase"
+	likeHandler "github.com/anjal-niraula/engage-engine/internal/modules/like/handler"
+	likeRepo "github.com/anjal-niraula/engage-engine/internal/modules/like/repository"
+	likeUsecase "github.com/anjal-niraula/engage-engine/internal/modules/like/usecase"
+	notificationHandler "github.com/anjal-niraula/engage-engine/internal/modules/notification/handler"
+	notificationRepo "github.com/anjal-niraula/engage-engine/internal/modules/notification/repository"
+	notificationUsecase "github.com/anjal-niraula/engage-engine/internal/modules/notification/usecase"
+	postHandler "github.com/anjal-niraula/engage-engine/internal/modules/post/handler"
+	postRepo "github.com/anjal-niraula/engage-engine/internal/modules/post/repository"
+	postUsecase "github.com/anjal-niraula/engage-engine/internal/modules/post/usecase"
 	userHandler "github.com/anjal-niraula/engage-engine/internal/modules/user/handler"
 	userRepo "github.com/anjal-niraula/engage-engine/internal/modules/user/repository"
 	userUsecase "github.com/anjal-niraula/engage-engine/internal/modules/user/usecase"
+	"github.com/anjal-niraula/engage-engine/internal/platform/config"
+	"github.com/anjal-niraula/engage-engine/internal/platform/docs"
+	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
+	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
+	"github.com/anjal-niraula/engage-engine/internal/platform/server"
 	sharedMw "github.com/anjal-niraula/engage-engine/internal/shared/middleware"
 )
 
@@ -33,7 +53,7 @@ func main() {
 
 	log := logger.NewLoggerWithService(cfg.Observability, loggerService)
 
-	// 3. Initialize server platform (managing PostgreSQL, Redis, HTTP server)
+	// 3. Initialize server platform (managing PostgreSQL, Redis, Kafka, HTTP server)
 	srv, err := server.New(cfg, &log, loggerService)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize server")
@@ -47,7 +67,10 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Setup User Module if database is connected
+	// Register interactive API Documentation (/docs and /docs/openapi.json)
+	docs.RegisterRoutes(mux)
+
+	// Setup application modules if database is connected
 	if srv.DB != nil && srv.DB.Pool != nil {
 		if cfg.Primary.Env == "local" || cfg.Primary.Env == "development" {
 			migrationCtx, cancelMigration := context.WithTimeout(context.Background(), 10*time.Second)
@@ -57,20 +80,62 @@ func main() {
 			cancelMigration()
 		}
 
-		userRepository := userRepo.NewPostgresUserRepository(srv.DB.Pool)
-		userUseCase := userUsecase.NewUserUseCase(userRepository, cfg.Server.JWTSecret, 24*time.Hour)
-		userHTTPHandler := userHandler.NewUserHandler(userUseCase)
-
 		requireAuth := sharedMw.RequireAuth(cfg.Server.JWTSecret)
 		optionalAuth := sharedMw.OptionalAuth(cfg.Server.JWTSecret)
 
+		// 1. User Module
+		userRepository := userRepo.NewPostgresUserRepository(srv.DB.Pool)
+		userUseCase := userUsecase.NewUserUseCase(userRepository, cfg.Server.JWTSecret, 24*time.Hour)
+		userHTTPHandler := userHandler.NewUserHandler(userUseCase)
 		userHandler.RegisterRoutes(mux, userHTTPHandler, requireAuth, optionalAuth)
-		log.Info().Msg("user module routes registered")
+
+		// 2. Post Module
+		postRepository := postRepo.NewPostgresPostRepository(srv.DB.Pool)
+		postUseCase := postUsecase.NewPostUseCase(postRepository)
+		postHTTPHandler := postHandler.NewPostHandler(postUseCase)
+		postHandler.RegisterRoutes(mux, postHTTPHandler, requireAuth, optionalAuth)
+
+		// 3. Like Module
+		likeRepository := likeRepo.NewPostgresLikeRepository(srv.DB.Pool)
+		likeUseCase := likeUsecase.NewLikeUseCase(likeRepository)
+		likeHTTPHandler := likeHandler.NewLikeHandler(likeUseCase)
+		likeHandler.RegisterRoutes(mux, likeHTTPHandler, requireAuth, optionalAuth)
+
+		// 4. Follow Module
+		followRepository := followRepo.NewPostgresFollowRepository(srv.DB.Pool)
+		followUseCase := followUsecase.NewFollowUseCase(followRepository)
+		followHTTPHandler := followHandler.NewFollowHandler(followUseCase)
+		followHandler.RegisterRoutes(mux, followHTTPHandler, requireAuth, optionalAuth)
+
+		// 5. Comment Module
+		commentRepository := commentRepo.NewPostgresCommentRepo(srv.DB.Pool)
+		commentUseCase := commentUsecase.NewCommentUseCase(commentRepository)
+		commentHTTPHandler := commentHandler.NewCommentHandler(commentUseCase, &log)
+		commentHandler.RegisterRoutes(mux, commentHTTPHandler, requireAuth, optionalAuth)
+
+		// 6. Notification Module
+		notificationRepository := notificationRepo.NewPostgresNotificationRepo(srv.DB.Pool)
+		notificationUseCase := notificationUsecase.NewNotificationUseCase(notificationRepository)
+		notificationHTTPHandler := notificationHandler.NewNotificationHandler(notificationUseCase, &log)
+		notificationHandler.RegisterRoutes(mux, notificationHTTPHandler, requireAuth, optionalAuth)
+
+		// 7. Analytics & Views Module
+		analyticsRepository := analyticsRepo.NewAnalyticsRepository(srv.DB.Pool, srv.Redis)
+		var kafkaViewProducer *analyticsRepo.KafkaViewProducer
+		if srv.Kafka != nil {
+			kafkaViewProducer = analyticsRepo.NewKafkaViewProducer(srv.Kafka, "engage.views")
+		}
+		analyticsUseCase := analyticsUsecase.NewAnalyticsUseCase(analyticsRepository, kafkaViewProducer)
+		analyticsHTTPHandler := analyticsHandler.NewAnalyticsHandler(analyticsUseCase, &log)
+		analyticsHandler.RegisterRoutes(mux, analyticsHTTPHandler, requireAuth, optionalAuth)
+
+		log.Info().Msg("all core modules successfully registered (user, post, like, follow, comment, notification, analytics)")
 	}
 
 	srv.SetupHTTPServer(mux)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// 5. Start server in a background goroutine
 	go func() {
@@ -81,13 +146,14 @@ func main() {
 
 	// 6. Wait for interrupt signal to gracefully shutdown
 	<-ctx.Done()
+	log.Info().Msg("received shutdown signal, shutting down gracefully...")
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout*time.Second)
+	defer cancel()
 
 	if err = srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatal().Err(err).Msg("server forced to shutdown")
 	}
-	stop()
-	cancel()
 
 	log.Info().Msg("server exited properly")
 }
