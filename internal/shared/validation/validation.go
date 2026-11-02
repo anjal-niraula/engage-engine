@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/anjal-niraula/engage-engine/internal/shared/errors"
+	"github.com/go-playground/validator/v10"
 )
 
 var validate *validator.Validate
@@ -113,4 +113,3 @@ var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 func IsValidUUID(uuid string) bool {
 	return uuidRegex.MatchString(uuid)
 }
-

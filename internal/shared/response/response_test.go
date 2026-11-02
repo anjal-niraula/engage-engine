@@ -122,4 +122,3 @@ func TestWriteError_Fallback(t *testing.T) {
 		t.Errorf("expected code INTERNAL_SERVER_ERROR, got %s", decoded.Code)
 	}
 }
-

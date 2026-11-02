@@ -85,4 +85,3 @@ func NewInternalServerError() *HTTPError {
 func ValidationError(err error) *HTTPError {
 	return NewBadRequestError("Validation failed: "+err.Error(), false, nil, nil, nil)
 }
-

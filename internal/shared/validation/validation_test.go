@@ -86,4 +86,3 @@ func TestIsValidUUID(t *testing.T) {
 		t.Errorf("expected %s to be invalid UUID", invalid)
 	}
 }
-

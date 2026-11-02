@@ -58,4 +58,3 @@ func (e *HTTPError) WithMessage(message string) *HTTPError {
 func MakeUpperCaseWithUnderscores(str string) string {
 	return strings.ToUpper(strings.ReplaceAll(str, " ", "_"))
 }
-

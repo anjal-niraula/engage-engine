@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	sharedErrors "github.com/anjal-niraula/engage-engine/internal/shared/errors"
 	"github.com/anjal-niraula/engage-engine/internal/shared/response"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type contextKey string
@@ -130,4 +130,3 @@ func OptionalAuth(secret string) func(http.Handler) http.Handler {
 		})
 	}
 }
-

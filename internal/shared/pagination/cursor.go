@@ -74,4 +74,3 @@ func ParsePaginationParams(r *http.Request, defaultLimit, maxLimit int) (int, st
 	cursor := r.URL.Query().Get("cursor")
 	return limit, cursor, nil
 }
-

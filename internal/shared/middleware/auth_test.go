@@ -121,4 +121,3 @@ func TestOptionalAuthMiddleware_WithAndWithoutToken(t *testing.T) {
 		t.Errorf("expected user in context, got status %d, hasUser %v, id %s", rec2.Code, hasUser, recordedUserID)
 	}
 }
-

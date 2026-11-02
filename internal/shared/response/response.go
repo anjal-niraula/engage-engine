@@ -73,4 +73,3 @@ func WriteError(w http.ResponseWriter, err error) {
 	w.WriteHeader(internalErr.Status)
 	_ = json.NewEncoder(w).Encode(internalErr)
 }
-
