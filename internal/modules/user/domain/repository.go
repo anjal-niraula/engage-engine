@@ -12,4 +12,3 @@ type UserRepository interface {
 	Update(ctx context.Context, user *User) error
 	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
 }
-

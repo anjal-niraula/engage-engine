@@ -168,4 +168,3 @@ func toUserOutput(u *domain.User) *UserOutput {
 		CreatedAt:      u.CreatedAt,
 	}
 }
-

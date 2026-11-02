@@ -61,4 +61,3 @@ type PublicProfileOutput struct {
 	IsFollowing    bool      `json:"is_following"`
 	CreatedAt      time.Time `json:"created_at"`
 }
-

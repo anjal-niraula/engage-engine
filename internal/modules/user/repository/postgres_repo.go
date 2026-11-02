@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/anjal-niraula/engage-engine/internal/modules/user/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/anjal-niraula/engage-engine/internal/modules/user/domain"
 )
 
 type postgresUserRepository struct {
@@ -134,4 +134,3 @@ func (r *postgresUserRepository) scanUser(row pgx.Row) (*domain.User, error) {
 	}
 	return &u, nil
 }
-

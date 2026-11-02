@@ -201,4 +201,3 @@ func TestUserHandler_GetByUsername(t *testing.T) {
 		t.Fatalf("expected status 404, got %d", rec404.Code)
 	}
 }
-

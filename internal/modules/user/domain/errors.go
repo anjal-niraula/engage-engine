@@ -15,4 +15,3 @@ var (
 	// ErrInvalidCredentials is returned when login authentication fails.
 	ErrInvalidCredentials = errors.New("invalid email/username or password")
 )
-

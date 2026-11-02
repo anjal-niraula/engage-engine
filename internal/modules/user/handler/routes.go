@@ -17,4 +17,3 @@ func RegisterRoutes(
 
 	mux.Handle("GET /api/v1/users/{username}", optionalAuth(http.HandlerFunc(h.GetByUsername)))
 }
-

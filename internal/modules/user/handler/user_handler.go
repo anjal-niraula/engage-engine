@@ -150,4 +150,3 @@ func (h *UserHandler) GetByUsername(w http.ResponseWriter, r *http.Request) {
 
 	response.WriteSuccess(w, http.StatusOK, profile)
 }
-

@@ -46,4 +46,3 @@ func (u *User) CheckPassword(plainPassword string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(plainPassword))
 	return err == nil
 }
-

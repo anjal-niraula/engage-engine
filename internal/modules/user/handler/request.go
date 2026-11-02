@@ -21,4 +21,3 @@ type UpdateProfileRequest struct {
 	AvatarURL   *string `json:"avatar_url" validate:"omitempty,url,max=512"`
 	Website     *string `json:"website" validate:"omitempty,url,max=255"`
 }
-

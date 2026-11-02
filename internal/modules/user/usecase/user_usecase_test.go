@@ -213,4 +213,3 @@ func TestUserUseCase_GetPublicProfile(t *testing.T) {
 		t.Errorf("expected is_following to be false for anonymous")
 	}
 }
-
