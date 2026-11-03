@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anjal-niraula/engage-engine/internal/platform/config"
@@ -120,25 +121,26 @@ func WithTraceContext(logger zerolog.Logger, txn *newrelic.Transaction) zerolog.
 		Logger()
 }
 
-// NewPgxLogger creates a database logger formatted for SQL statements.
+// NewPgxLogger creates a database logger formatted for clean single-line SQL statements.
 func NewPgxLogger(level zerolog.Level) zerolog.Logger {
 	writer := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
-		TimeFormat: "2006-01-02 15:04:05",
+		TimeFormat: "15:04:05",
 		FormatFieldValue: func(i any) string {
 			switch v := i.(type) {
 			case string:
-				if len(v) > 200 {
-					return v[:200] + "..."
+				cleaned := strings.Join(strings.Fields(v), " ")
+				if len(cleaned) > 130 {
+					return cleaned[:130] + "..."
 				}
-				return v
+				return cleaned
 			case []byte:
 				var obj interface{}
 				if err := json.Unmarshal(v, &obj); err == nil {
-					pretty, _ := json.MarshalIndent(obj, "", "    ")
-					return "\n" + string(pretty)
+					compact, _ := json.Marshal(obj)
+					return string(compact)
 				}
-				return string(v)
+				return strings.Join(strings.Fields(string(v)), " ")
 			default:
 				return fmt.Sprintf("%v", v)
 			}
@@ -149,7 +151,7 @@ func NewPgxLogger(level zerolog.Level) zerolog.Logger {
 		Level(level).
 		With().
 		Timestamp().
-		Str("component", "database").
+		Str("component", "db").
 		Logger()
 }
 
@@ -157,7 +159,7 @@ func NewPgxLogger(level zerolog.Level) zerolog.Logger {
 func GetPgxTraceLogLevel(level zerolog.Level) int {
 	switch level {
 	case zerolog.DebugLevel:
-		return 6 // tracelog.LogLevelDebug
+		return 5 // tracelog.LogLevelDebug: logs SQL queries & durations, filters out pool acquire/release noise
 	case zerolog.InfoLevel:
 		return 4 // tracelog.LogLevelInfo
 	case zerolog.WarnLevel:
