@@ -27,4 +27,3 @@ func RegisterRoutes(mux *http.ServeMux) {
 		_, _ = w.Write(openAPIHTML)
 	})
 }
-

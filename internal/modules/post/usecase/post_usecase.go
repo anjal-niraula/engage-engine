@@ -18,13 +18,26 @@ type PostUseCase interface {
 	GetFeed(ctx context.Context, userID string, limit int, cursorStr string) ([]*PostOutput, *string, bool, error)
 }
 
-type postUseCase struct {
-	postRepo domain.PostRepository
+// LikeVerifier checks whether a user has liked a post (e.g. via Cuckoo Filter with DB fallback).
+type LikeVerifier interface {
+	HasLiked(ctx context.Context, userID, postID string) (bool, error)
 }
 
-// NewPostUseCase constructs an instance of PostUseCase.
-func NewPostUseCase(postRepo domain.PostRepository) PostUseCase {
-	return &postUseCase{postRepo: postRepo}
+type postUseCase struct {
+	postRepo     domain.PostRepository
+	likeVerifier LikeVerifier
+}
+
+// NewPostUseCase constructs an instance of PostUseCase with optional LikeVerifier.
+func NewPostUseCase(postRepo domain.PostRepository, verifier ...LikeVerifier) PostUseCase {
+	var v LikeVerifier
+	if len(verifier) > 0 {
+		v = verifier[0]
+	}
+	return &postUseCase{
+		postRepo:     postRepo,
+		likeVerifier: v,
+	}
 }
 
 func (uc *postUseCase) CreatePost(ctx context.Context, authorID string, input CreatePostInput) (*PostOutput, error) {
@@ -66,8 +79,12 @@ func (uc *postUseCase) GetPost(ctx context.Context, postID string, viewerID stri
 
 	hasLiked := false
 	if viewerID != "" {
-		likedMap, _ := uc.postRepo.BatchCheckLiked(ctx, viewerID, []string{postID})
-		hasLiked = likedMap[postID]
+		if uc.likeVerifier != nil {
+			hasLiked, _ = uc.likeVerifier.HasLiked(ctx, viewerID, postID)
+		} else {
+			likedMap, _ := uc.postRepo.BatchCheckLiked(ctx, viewerID, []string{postID})
+			hasLiked = likedMap[postID]
+		}
 	}
 
 	return toPostOutput(post, hasLiked, authorOut), nil
@@ -162,7 +179,18 @@ func (uc *postUseCase) GetFeed(ctx context.Context, userID string, limit int, cu
 	}
 
 	authorsMap, _ := uc.postRepo.BatchGetAuthors(ctx, authorIDs)
-	likedMap, _ := uc.postRepo.BatchCheckLiked(ctx, userID, postIDs)
+
+	likedMap := make(map[string]bool)
+	if userID != "" {
+		if uc.likeVerifier != nil {
+			for _, pID := range postIDs {
+				liked, _ := uc.likeVerifier.HasLiked(ctx, userID, pID)
+				likedMap[pID] = liked
+			}
+		} else {
+			likedMap, _ = uc.postRepo.BatchCheckLiked(ctx, userID, postIDs)
+		}
+	}
 
 	output := make([]*PostOutput, 0, len(posts))
 	for _, p := range posts {

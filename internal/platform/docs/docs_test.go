@@ -41,4 +41,3 @@ func TestDocsRoutes(t *testing.T) {
 		assert.NotNil(t, spec["paths"])
 	})
 }
-

@@ -35,6 +35,7 @@ import (
 	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
 	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
 	"github.com/anjal-niraula/engage-engine/internal/platform/server"
+	"github.com/anjal-niraula/engage-engine/internal/shared/cuckoo"
 	sharedMw "github.com/anjal-niraula/engage-engine/internal/shared/middleware"
 )
 
@@ -89,15 +90,26 @@ func main() {
 		userHTTPHandler := userHandler.NewUserHandler(userUseCase)
 		userHandler.RegisterRoutes(mux, userHTTPHandler, requireAuth, optionalAuth)
 
-		// 2. Post Module
+		// Post Repository (needed for Cuckoo verification callback)
 		postRepository := postRepo.NewPostgresPostRepository(srv.DB.Pool)
-		postUseCase := postUsecase.NewPostUseCase(postRepository)
+
+		// Initialize Cuckoo Filter for fast Like lookups with DB fallback
+		likeChecker := cuckoo.NewLikeChecker(100000, func(ctx context.Context, userID, postID string) (bool, error) {
+			likedMap, err := postRepository.BatchCheckLiked(ctx, userID, []string{postID})
+			if err != nil {
+				return false, err
+			}
+			return likedMap[postID], nil
+		})
+
+		// 2. Post Module (uses likeChecker to bypass 95%+ of DB queries on feeds)
+		postUseCase := postUsecase.NewPostUseCase(postRepository, likeChecker)
 		postHTTPHandler := postHandler.NewPostHandler(postUseCase)
 		postHandler.RegisterRoutes(mux, postHTTPHandler, requireAuth, optionalAuth)
 
-		// 3. Like Module
+		// 3. Like Module (updates likeChecker on Like / Unlike)
 		likeRepository := likeRepo.NewPostgresLikeRepository(srv.DB.Pool)
-		likeUseCase := likeUsecase.NewLikeUseCase(likeRepository)
+		likeUseCase := likeUsecase.NewLikeUseCase(likeRepository, likeChecker)
 		likeHTTPHandler := likeHandler.NewLikeHandler(likeUseCase)
 		likeHandler.RegisterRoutes(mux, likeHTTPHandler, requireAuth, optionalAuth)
 

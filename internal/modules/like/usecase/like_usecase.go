@@ -18,19 +18,36 @@ type LikeUseCase interface {
 	UnlikeComment(ctx context.Context, userID, commentID string) (*LikeToggleOutput, error)
 }
 
-type likeUseCase struct {
-	likeRepo domain.LikeRepository
+// LikeFilter defines the interface for recording/evicting likes in a probabilistic filter.
+type LikeFilter interface {
+	RecordLike(userID, postID string) error
+	RecordUnlike(userID, postID string) bool
 }
 
-// NewLikeUseCase creates a new LikeUseCase instance.
-func NewLikeUseCase(likeRepo domain.LikeRepository) LikeUseCase {
-	return &likeUseCase{likeRepo: likeRepo}
+type likeUseCase struct {
+	likeRepo domain.LikeRepository
+	filter   LikeFilter
+}
+
+// NewLikeUseCase creates a new LikeUseCase instance with optional Cuckoo like filter.
+func NewLikeUseCase(likeRepo domain.LikeRepository, filter ...LikeFilter) LikeUseCase {
+	var f LikeFilter
+	if len(filter) > 0 {
+		f = filter[0]
+	}
+	return &likeUseCase{
+		likeRepo: likeRepo,
+		filter:   f,
+	}
 }
 
 func (uc *likeUseCase) LikePost(ctx context.Context, userID, postID string) (*LikeToggleOutput, error) {
-	_, count, err := uc.likeRepo.LikePost(ctx, userID, postID)
+	isNewLike, count, err := uc.likeRepo.LikePost(ctx, userID, postID)
 	if err != nil {
 		return nil, err
+	}
+	if uc.filter != nil && isNewLike {
+		_ = uc.filter.RecordLike(userID, postID)
 	}
 	return &LikeToggleOutput{
 		TargetID:   postID,
@@ -40,9 +57,12 @@ func (uc *likeUseCase) LikePost(ctx context.Context, userID, postID string) (*Li
 }
 
 func (uc *likeUseCase) UnlikePost(ctx context.Context, userID, postID string) (*LikeToggleOutput, error) {
-	_, count, err := uc.likeRepo.UnlikePost(ctx, userID, postID)
+	wasDeleted, count, err := uc.likeRepo.UnlikePost(ctx, userID, postID)
 	if err != nil {
 		return nil, err
+	}
+	if uc.filter != nil && wasDeleted {
+		_ = uc.filter.RecordUnlike(userID, postID)
 	}
 	return &LikeToggleOutput{
 		TargetID:   postID,
