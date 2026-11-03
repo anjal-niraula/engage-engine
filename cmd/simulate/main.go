@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
@@ -35,6 +36,7 @@ func main() {
 	delay := flag.Duration("delay", 0, "Throttle delay between batch rounds (default 0 for maximum speed)")
 	uniqueRatio := flag.Float64("unique-ratio", 0.85, "Ratio of unique viewers (0.0 to 1.0) for HLL testing")
 	useHTTP := flag.Bool("http", false, "Send real HTTP requests to REST API (like Gatling/k6 load test)")
+	waitDrain := flag.Bool("wait", true, "Wait for background Kafka consumers to drain and commit 100% of events to PostgreSQL")
 
 	flag.Parse()
 
@@ -78,32 +80,52 @@ func main() {
 	err = srv.DB.Pool.QueryRow(ctx, "SELECT id, username, display_name FROM users WHERE username = $1", *userFlag).
 		Scan(&targetUserID, &targetUsername, &targetDisplayName)
 	if err != nil {
-		fmt.Printf("❌ User '@%s' not found in database. Run 'make seed' first!\n", *userFlag)
-		os.Exit(1)
-	}
-
-	// 2. Resolve Target Post
-	var targetPostID string
-	if *postFlag != "" {
-		targetPostID = *postFlag
-	} else {
+		targetDisplayName = *userFlag
+		if *userFlag == "neo_tokyo" {
+			targetDisplayName = "Kenji Sato"
+		}
 		err = srv.DB.Pool.QueryRow(ctx, `
-			SELECT id FROM posts 
-			WHERE author_id = $1 AND deleted_at IS NULL 
-			ORDER BY created_at DESC LIMIT 1
-		`, targetUserID).Scan(&targetPostID)
+			INSERT INTO users (id, username, email, password_hash, display_name, bio)
+			VALUES (gen_random_uuid(), $1, $1 || '@example.com', 'seeded_hash', $2, 'Cyberpunk photography in Tokyo 🌧️🗼')
+			ON CONFLICT (username) DO UPDATE SET username = EXCLUDED.username
+			RETURNING id, username, display_name
+		`, *userFlag, targetDisplayName).Scan(&targetUserID, &targetUsername, &targetDisplayName)
 		if err != nil {
-			fmt.Printf("⚠️ No existing post found for @%s. Run 'make seed' first!\n", targetUsername)
+			fmt.Printf("❌ Failed to resolve or create user '@%s': %v\n", *userFlag, err)
 			os.Exit(1)
 		}
 	}
-	targetPostUUID, _ := uuid.Parse(targetPostID)
+
+	// 2. Resolve Target Post (only needed for views, likes, comments)
+	var targetPostID string
+	var targetPostUUID uuid.UUID
+	if *viewsCount > 0 || *likesCount > 0 || *commentsCount > 0 {
+		if *postFlag != "" {
+			targetPostID = *postFlag
+		} else {
+			_ = srv.DB.Pool.QueryRow(ctx, `
+				SELECT id FROM posts 
+				WHERE author_id = $1 AND deleted_at IS NULL 
+				ORDER BY created_at DESC LIMIT 1
+			`, targetUserID).Scan(&targetPostID)
+			if targetPostID == "" {
+				_ = srv.DB.Pool.QueryRow(ctx, `
+					INSERT INTO posts (id, author_id, caption, media_urls, media_type)
+					VALUES (gen_random_uuid(), $1, 'Tokyo cyberpunk aesthetic 🌧️🗼', '{"https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800"}', 'image')
+					RETURNING id
+				`, targetUserID).Scan(&targetPostID)
+			}
+		}
+		targetPostUUID, _ = uuid.Parse(targetPostID)
+	}
 
 	fmt.Println("╔══════════════════════════════════════════════════════════════════════════╗")
 	fmt.Println("║      ENGAGE ENGINE — HIGH-THROUGHPUT SYSTEM DESIGN TRAFFIC SIMULATOR     ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════════════════╝")
 	fmt.Printf(" 🎯 Target Persona:     @%s (%s)\n", targetUsername, targetDisplayName)
-	fmt.Printf(" 📸 Target Post ID:     %s\n", targetPostID)
+	if targetPostID != "" {
+		fmt.Printf(" 📸 Target Post ID:     %s\n", targetPostID)
+	}
 	if *useHTTP {
 		fmt.Println(" 🌐 Simulation Engine:  REAL HTTP REST API (Gatling/k6 benchmark mode -> http://localhost:8080)")
 	} else {
@@ -118,8 +140,11 @@ func main() {
 	// PHASE 1: FOLLOWERS BURST (engage.follows -> Kafka -> Worker -> PostgreSQL)
 	// =========================================================================
 	if *followersCount > 0 {
-		fmt.Printf("\n🚀 [PHASE 1] Bombarding Kafka with %s Follows for @%s...\n",
-			formatNumber(*followersCount), targetUsername)
+		var initialFollowers int64
+		_ = srv.DB.Pool.QueryRow(ctx, "SELECT followers_count FROM users WHERE id = $1", targetUserID).Scan(&initialFollowers)
+
+		fmt.Printf("\n🚀 [PHASE 1] Bombarding Kafka with %s Follows for @%s (Initial DB Count: %s)...\n",
+			formatNumber(*followersCount), targetUsername, formatNumber(int(initialFollowers)))
 		start := time.Now()
 		var totalSent int64
 
@@ -200,18 +225,31 @@ func main() {
 		close(doneReport)
 		elapsed := time.Since(start)
 		rps := float64(totalSent) / max(0.001, elapsed.Seconds())
-		var finalFollowers int64
-		_ = srv.DB.Pool.QueryRow(ctx, "SELECT followers_count FROM users WHERE id = $1", targetUserID).Scan(&finalFollowers)
-		fmt.Printf("\n   ✅ Follow burst dispatched in %s (%s RPS)! Current DB followers_count: %s\n",
-			elapsed.Round(time.Millisecond), formatNumber(int(rps)), formatNumber(int(finalFollowers)))
+		fmt.Printf("\n   ✅ Follow burst dispatched to Kafka in %s (%s RPS)!\n",
+			elapsed.Round(time.Millisecond), formatNumber(int(rps)))
+
+		if *waitDrain && srv.Kafka != nil {
+			waitForConsumerDrain(ctx, "followers", initialFollowers, *followersCount, func() (int64, error) {
+				var count int64
+				err := srv.DB.Pool.QueryRow(ctx, "SELECT followers_count FROM users WHERE id = $1", targetUserID).Scan(&count)
+				return count, err
+			})
+		} else {
+			var finalFollowers int64
+			_ = srv.DB.Pool.QueryRow(ctx, "SELECT followers_count FROM users WHERE id = $1", targetUserID).Scan(&finalFollowers)
+			fmt.Printf("   ℹ️  Current DB followers_count: %s (Draining in background)\n", formatNumber(int(finalFollowers)))
+		}
 	}
 
 	// =========================================================================
 	// PHASE 2: MILLION VIEWS & REDIS HYPERLOGLOG DEDUPLICATION SURGE
 	// =========================================================================
 	if *viewsCount > 0 {
-		fmt.Printf("\n🚀 [PHASE 2] Simulating %s Views with Redis HyperLogLog (Target unique ratio: %.0f%%)...\n",
-			formatNumber(*viewsCount), *uniqueRatio*100)
+		var initialViews int64
+		_ = srv.DB.Pool.QueryRow(ctx, "SELECT views_count FROM posts WHERE id = $1", targetPostUUID).Scan(&initialViews)
+
+		fmt.Printf("\n🚀 [PHASE 2] Simulating %s Views with Redis HyperLogLog (Initial DB: %s, Unique Ratio: %.0f%%)...\n",
+			formatNumber(*viewsCount), formatNumber(int(initialViews)), *uniqueRatio*100)
 		start := time.Now()
 		var totalViewsSent int64
 		var actualDistinctGenerated int64
@@ -237,6 +275,17 @@ func main() {
 		}
 		close(batchChan)
 
+		fastHTTPTransport := &http.Transport{
+			MaxIdleConns:        1000,
+			MaxIdleConnsPerHost: 200,
+			IdleConnTimeout:     90 * time.Second,
+			DisableKeepAlives:   false,
+		}
+		fastHTTPClient := &http.Client{
+			Transport: fastHTTPTransport,
+			Timeout:   5 * time.Second,
+		}
+
 		var wg sync.WaitGroup
 		for w := 0; w < *workersCount; w++ {
 			wg.Add(1)
@@ -248,7 +297,6 @@ func main() {
 					}
 
 					if *useHTTP {
-						httpClient := &http.Client{Timeout: 3 * time.Second}
 						for i := 0; i < curSize; i++ {
 							var sess string
 							if rand.Float64() < *uniqueRatio {
@@ -265,7 +313,8 @@ func main() {
 							})
 							req, _ := http.NewRequestWithContext(ctx, "POST", "http://localhost:8080/api/v1/views", bytes.NewReader(payload))
 							req.Header.Set("Content-Type", "application/json")
-							if resp, err := httpClient.Do(req); err == nil {
+							if resp, err := fastHTTPClient.Do(req); err == nil {
+								_, _ = io.Copy(io.Discard, resp.Body)
 								_ = resp.Body.Close()
 							}
 						}
@@ -364,6 +413,15 @@ func main() {
 		_ = srv.DB.Pool.QueryRow(ctx, "SELECT views_count FROM posts WHERE id = $1", targetPostUUID).Scan(&finalDBViews)
 
 		fmt.Printf("\n   ✅ View burst dispatched in %s (%s RPS)!\n", elapsed.Round(time.Millisecond), formatNumber(int(rps)))
+
+		if *waitDrain && !*useHTTP && srv.Kafka != nil {
+			waitForConsumerDrain(ctx, "views", initialViews, *viewsCount, func() (int64, error) {
+				var count int64
+				err := srv.DB.Pool.QueryRow(ctx, "SELECT views_count FROM posts WHERE id = $1", targetPostUUID).Scan(&count)
+				return count, err
+			})
+		}
+
 		fmt.Println("\n   ┌────────────────────────────────────────────────────────┐")
 		fmt.Println("   │ 🧠 SYSTEM DESIGN LESSON: REDIS HYPERLOGLOG EFFICIENCY  │")
 		fmt.Println("   ├────────────────────────────────────────────────────────┤")
@@ -380,8 +438,11 @@ func main() {
 	// PHASE 3: LIKES SURGE (engage.likes -> Kafka -> Worker -> Cuckoo Filter)
 	// =========================================================================
 	if *likesCount > 0 {
-		fmt.Printf("\n🚀 [PHASE 3] Simulating %s Likes Surge on Post %s...\n",
-			formatNumber(*likesCount), targetPostID)
+		var initialLikes int64
+		_ = srv.DB.Pool.QueryRow(ctx, "SELECT likes_count FROM posts WHERE id = $1", targetPostUUID).Scan(&initialLikes)
+
+		fmt.Printf("\n🚀 [PHASE 3] Simulating %s Likes Surge on Post %s (Initial DB Count: %s)...\n",
+			formatNumber(*likesCount), targetPostID, formatNumber(int(initialLikes)))
 		start := time.Now()
 		var totalLikesSent int64
 
@@ -458,7 +519,19 @@ func main() {
 		close(doneReport)
 		elapsed := time.Since(start)
 		rps := float64(totalLikesSent) / max(0.001, elapsed.Seconds())
-		fmt.Printf("\n   ✅ Like burst dispatched in %s (%s RPS)!\n", elapsed.Round(time.Millisecond), formatNumber(int(rps)))
+		fmt.Printf("\n   ✅ Like burst dispatched to Kafka in %s (%s RPS)!\n", elapsed.Round(time.Millisecond), formatNumber(int(rps)))
+
+		if *waitDrain && srv.Kafka != nil {
+			waitForConsumerDrain(ctx, "likes", initialLikes, *likesCount, func() (int64, error) {
+				var count int64
+				err := srv.DB.Pool.QueryRow(ctx, "SELECT likes_count FROM posts WHERE id = $1", targetPostUUID).Scan(&count)
+				return count, err
+			})
+		} else {
+			var finalLikes int64
+			_ = srv.DB.Pool.QueryRow(ctx, "SELECT likes_count FROM posts WHERE id = $1", targetPostUUID).Scan(&finalLikes)
+			fmt.Printf("   ℹ️  Current DB likes_count: %s (Draining in background)\n", formatNumber(int(finalLikes)))
+		}
 	}
 
 	// =========================================================================
@@ -516,4 +589,76 @@ func max(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// waitForConsumerDrain actively polls PostgreSQL until the background Kafka worker
+// finishes committing the micro-batches, displaying a real-time progress bar.
+func waitForConsumerDrain(
+	ctx context.Context,
+	entityName string,
+	initialCount int64,
+	addedCount int,
+	getCount func() (int64, error),
+) {
+	targetCount := initialCount + int64(addedCount)
+	fmt.Printf("   📥 Waiting for Kafka %s consumer to persist micro-batches -> PostgreSQL (Target: %s)...\n",
+		entityName, formatNumber(int(targetCount)))
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	drainStart := time.Now()
+	lastCount := initialCount
+	stagnantTicks := 0
+
+	for {
+		currentDB, err := getCount()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		persisted := currentDB - initialCount
+		if persisted < 0 {
+			persisted = 0
+		}
+		pct := float64(persisted) / float64(addedCount) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		lag := int64(addedCount) - persisted
+		if lag < 0 {
+			lag = 0
+		}
+
+		fmt.Printf("\r   ⏳ [Consumer Drain] DB %s: %s / %s (%.1f%%) | Kafka Lag: ~%s events   ",
+			entityName, formatNumber(int(currentDB)), formatNumber(int(targetCount)), pct, formatNumber(int(lag)))
+
+		if currentDB >= targetCount {
+			fmt.Printf("\n   🎯 [100%% PERSISTED] All %s %s committed to PostgreSQL in %s!\n",
+				formatNumber(addedCount), entityName, time.Since(drainStart).Round(time.Millisecond))
+			break
+		}
+
+		if currentDB == lastCount {
+			stagnantTicks++
+			// If no progress for 5 seconds (25 ticks of 200ms)
+			if stagnantTicks >= 25 {
+				fmt.Printf("\n   ⚠️  Consumer drain paused (no DB updates for 5s). Current DB %s: %s.\n",
+					entityName, formatNumber(int(currentDB)))
+				fmt.Println("      Ensure the background consumer is running (e.g. 'make run-worker' or 'make run-api').")
+				break
+			}
+		} else {
+			stagnantTicks = 0
+			lastCount = currentDB
+		}
+
+		select {
+		case <-ctx.Done():
+			fmt.Println("\n   Simulation cancelled by user.")
+			return
+		case <-ticker.C:
+		}
+	}
 }

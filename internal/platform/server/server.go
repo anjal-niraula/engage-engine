@@ -12,6 +12,7 @@ import (
 	loggerPkg "github.com/anjal-niraula/engage-engine/internal/platform/logger"
 	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
 	redisPkg "github.com/anjal-niraula/engage-engine/internal/platform/redis"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/rs/zerolog"
 )
 
@@ -62,6 +63,19 @@ func New(cfg *config.Config, logger *zerolog.Logger, loggerService *loggerPkg.Lo
 }
 
 func (s *Server) SetupHTTPServer(handler http.Handler) {
+	if s.LoggerService != nil && s.LoggerService.GetApplication() != nil {
+		app := s.LoggerService.GetApplication()
+		originalHandler := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			txn := app.StartTransaction(r.Method + " " + r.URL.Path)
+			defer txn.End()
+			txn.SetWebRequestHTTP(r)
+			w = txn.SetWebResponse(w)
+			r = newrelic.RequestWithTransactionContext(r, txn)
+			originalHandler.ServeHTTP(w, r)
+		})
+	}
+
 	s.httpServer = &http.Server{
 		Addr:         ":" + s.Config.Server.Port,
 		Handler:      handler,

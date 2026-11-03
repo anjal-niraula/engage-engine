@@ -9,6 +9,7 @@ import (
 	"github.com/anjal-niraula/engage-engine/internal/modules/views/domain"
 	"github.com/anjal-niraula/engage-engine/internal/platform/server"
 	"github.com/google/uuid"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/rs/zerolog"
 	segmentio "github.com/segmentio/kafka-go"
 )
@@ -59,16 +60,23 @@ func RunViewsMicroBatchConsumer(ctx context.Context, srv *server.Server, log *ze
 		}
 
 		if srv.DB != nil && srv.DB.Pool != nil && len(viewDeltas) > 0 {
-			tx, err := srv.DB.Pool.Begin(ctx)
+			flushCtx := ctx
+			if srv.LoggerService != nil && srv.LoggerService.GetApplication() != nil {
+				txn := srv.LoggerService.GetApplication().StartTransaction("KafkaWorker.ViewsFlush")
+				defer txn.End()
+				flushCtx = newrelic.NewContext(ctx, txn)
+			}
+
+			tx, err := srv.DB.Pool.Begin(flushCtx)
 			if err == nil {
 				for postID, delta := range viewDeltas {
-					_, _ = tx.Exec(ctx, `
+					_, _ = tx.Exec(flushCtx, `
 						UPDATE posts 
 						SET views_count = views_count + $1 
 						WHERE id = $2 AND deleted_at IS NULL
 					`, delta, postID)
 
-					_, _ = tx.Exec(ctx, `
+					_, _ = tx.Exec(flushCtx, `
 						INSERT INTO post_daily_analytics (post_id, date, views)
 						VALUES ($1, CURRENT_DATE, $2)
 						ON CONFLICT (post_id, date)
@@ -76,7 +84,7 @@ func RunViewsMicroBatchConsumer(ctx context.Context, srv *server.Server, log *ze
 							views = post_daily_analytics.views + $2
 					`, postID, delta)
 				}
-				_ = tx.Commit(ctx)
+				_ = tx.Commit(flushCtx)
 			}
 		}
 
