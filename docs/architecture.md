@@ -6,7 +6,7 @@ This document outlines the architectural standards and design patterns for `enga
 
 ## 1. Core Architectural Principles
 
-1. **Modular Monolith**: Code is organized around business features (`user`, `post`, `like`, `comment`, `follow`, `notification`, `analytics`) rather than technical layers. The entire codebase deploys as a unified binary, avoiding microservice operational overhead while preserving clean domain boundaries.
+1. **Modular Monolith**: Code is organized around business features (`user`, `post`, `like`, `comment`, `follow`, `views`, `notification`) rather than technical layers. The entire codebase deploys as a unified binary, avoiding microservice operational overhead while preserving clean domain boundaries.
 2. **Clean Architecture Inside Modules**: Each feature module internally enforces Clean Architecture:
    - `domain/`: Business entities and domain-specific rules (zero external dependencies).
    - `repository/`: Persistence interfaces (ports) declared close to the domain and use cases.
@@ -60,7 +60,7 @@ engage-engine/
 │   │   │   ├── usecase/
 │   │   │   ├── repository/
 │   │   │   └── handler/
-│   │   └── analytics/            # Impression tracking and view counters
+│   │   └── views/                # Impression tracking, Redis HLL & view counters
 │   │       ├── domain/
 │   │       ├── usecase/
 │   │       ├── repository/

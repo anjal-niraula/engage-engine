@@ -115,6 +115,18 @@ func TestUserHandler_Register(t *testing.T) {
 		}
 	})
 
+	t.Run("successful registration with underscore and dot in username", func(t *testing.T) {
+		body := `{"username":"sophia_dev","email":"sophia@example.com","password":"Password123!","display_name":"Sophia Chen"}`
+		req := httptest.NewRequest("POST", "/api/v1/users/register", bytes.NewBufferString(body))
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected status 201, got %d, body: %s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("validation error on short password", func(t *testing.T) {
 		body := `{"username":"sarah2","email":"sarah2@example.com","password":"123","display_name":"Sarah"}`
 		req := httptest.NewRequest("POST", "/api/v1/users/register", bytes.NewBufferString(body))

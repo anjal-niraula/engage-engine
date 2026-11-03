@@ -13,7 +13,11 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-var validate *validator.Validate
+var (
+	validate      *validator.Validate
+	usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
+	uuidRegex     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+)
 
 func init() {
 	validate = validator.New()
@@ -25,6 +29,11 @@ func init() {
 			return ""
 		}
 		return name
+	})
+
+	// Custom username validation: allows letters, numbers, underscores, and dots (standard for social media)
+	_ = validate.RegisterValidation("username", func(fl validator.FieldLevel) bool {
+		return usernameRegex.MatchString(fl.Field().String())
 	})
 }
 
@@ -99,6 +108,8 @@ func formatValidationMessage(fe validator.FieldError) string {
 		return "must be a valid UUID"
 	case "url":
 		return "must be a valid URL"
+	case "username":
+		return "must contain only letters, numbers, underscores, or periods"
 	default:
 		if fe.Param() != "" {
 			return fmt.Sprintf("failed validation on rule '%s:%s'", fe.Tag(), fe.Param())
@@ -106,8 +117,6 @@ func formatValidationMessage(fe validator.FieldError) string {
 		return fmt.Sprintf("failed validation on rule '%s'", fe.Tag())
 	}
 }
-
-var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // IsValidUUID tests whether a given string is a valid RFC 4122 UUID.
 func IsValidUUID(uuid string) bool {

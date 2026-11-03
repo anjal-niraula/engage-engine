@@ -2,7 +2,7 @@ package handler
 
 // RegisterRequest holds validated fields for user registration.
 type RegisterRequest struct {
-	Username    string `json:"username" validate:"required,min=3,max=30,alphanum"`
+	Username    string `json:"username" validate:"required,min=3,max=30,username"`
 	Email       string `json:"email" validate:"required,email,max=255"`
 	Password    string `json:"password" validate:"required,min=8,max=72"`
 	DisplayName string `json:"display_name" validate:"required,min=1,max=100"`

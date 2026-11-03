@@ -46,7 +46,7 @@ engage-engine/
 │   │   │   ├── usecase/
 │   │   │   ├── repository/
 │   │   │   └── handler/
-│   │   └── analytics/
+│   │   └── views/
 │   │       ├── domain/
 │   │       ├── usecase/
 │   │       ├── repository/
@@ -96,7 +96,7 @@ engage-engine/
 
 ## 2. Architectural Principles
 
-1. **Feature-Based Modular Monolith**: Code is partitioned by business capabilities (`user`, `post`, `like`, `comment`, `follow`, `notification`, `analytics`) rather than horizontal technical layers.
+1. **Feature-Based Modular Monolith**: Code is partitioned by business capabilities (`user`, `post`, `like`, `comment`, `follow`, `views`, `notification`) rather than horizontal technical layers.
 2. **Clean Architecture Inside Modules**: Each module has its own `domain/`, `usecase/`, `repository/`, and `handler/http/` packages. Domain logic remains independent of databases and frameworks.
 3. **Repository Interface Colocation**: Repository interfaces are defined inside each module's `repository/` package, close to the use cases that consume them.
 4. **Platform Infrastructure Isolation**: Concrete drivers for MongoDB, PostgreSQL, Redis, and Kafka remain isolated inside `internal/platform/`.

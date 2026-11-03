@@ -27,12 +27,13 @@ func New(cfg config.KafkaConfig, logger *zerolog.Logger) (*Client, error) {
 	writer := &segmentio.Writer{
 		Addr:         segmentio.TCP(cfg.Brokers...),
 		Balancer:     &segmentio.LeastBytes{},
+		BatchSize:    1000,
 		BatchTimeout: 10 * time.Millisecond,
 		RequiredAcks: segmentio.RequireOne,
 		MaxAttempts:  3,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
-		Async:        false,
+		Async:        true,
 	}
 
 	client := &Client{
@@ -60,6 +61,14 @@ func (c *Client) Publish(ctx context.Context, topic string, key []byte, value []
 		Time:  time.Now(),
 	}
 	return c.writer.WriteMessages(ctx, msg)
+}
+
+// PublishBatch publishes a slice of messages in a single high-throughput batch.
+func (c *Client) PublishBatch(ctx context.Context, msgs []segmentio.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	return c.writer.WriteMessages(ctx, msgs...)
 }
 
 // NewConsumer creates a segmentio Reader for consuming events from a topic.

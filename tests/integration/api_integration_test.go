@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	analyticsHandler "github.com/anjal-niraula/engage-engine/internal/modules/analytics/handler"
-	analyticsRepo "github.com/anjal-niraula/engage-engine/internal/modules/analytics/repository"
-	analyticsUsecase "github.com/anjal-niraula/engage-engine/internal/modules/analytics/usecase"
+	viewsHandler "github.com/anjal-niraula/engage-engine/internal/modules/views/handler"
+	viewsRepo "github.com/anjal-niraula/engage-engine/internal/modules/views/repository"
+	viewsUsecase "github.com/anjal-niraula/engage-engine/internal/modules/views/usecase"
 	commentHandler "github.com/anjal-niraula/engage-engine/internal/modules/comment/handler"
 	commentRepo "github.com/anjal-niraula/engage-engine/internal/modules/comment/repository"
 	commentUsecase "github.com/anjal-niraula/engage-engine/internal/modules/comment/usecase"
@@ -105,11 +105,11 @@ func TestEndToEndAPI_Integration(t *testing.T) {
 	notifH := notificationHandler.NewNotificationHandler(notifUC, &logger)
 	notificationHandler.RegisterRoutes(mux, notifH, requireAuth, optionalAuth)
 
-	// Analytics
-	analyticsR := analyticsRepo.NewAnalyticsRepository(db.Pool, nil)
-	analyticsUC := analyticsUsecase.NewAnalyticsUseCase(analyticsR, nil)
-	analyticsH := analyticsHandler.NewAnalyticsHandler(analyticsUC, &logger)
-	analyticsHandler.RegisterRoutes(mux, analyticsH, requireAuth, optionalAuth)
+	// Views
+	viewsR := viewsRepo.NewViewRepository(db.Pool, nil)
+	viewsUC := viewsUsecase.NewViewUseCase(viewsR, nil)
+	viewsH := viewsHandler.NewViewsHandler(viewsUC, &logger)
+	viewsHandler.RegisterRoutes(mux, viewsH, requireAuth, optionalAuth)
 
 	uniqueSuffix := time.Now().UnixNano()
 	user1Name := fmt.Sprintf("userone%d", uniqueSuffix%1000000)
