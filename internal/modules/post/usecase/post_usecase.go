@@ -23,21 +23,29 @@ type LikeVerifier interface {
 	HasLiked(ctx context.Context, userID, postID string) (bool, error)
 }
 
+// StatsEnricher enriches posts with realtime view counters and unique reach (HyperLogLog) from Redis.
+type StatsEnricher interface {
+	EnrichPosts(ctx context.Context, posts ...*PostOutput)
+}
+
 type postUseCase struct {
 	postRepo     domain.PostRepository
 	likeVerifier LikeVerifier
+	enricher     StatsEnricher
 }
 
-// NewPostUseCase constructs an instance of PostUseCase with optional LikeVerifier.
-func NewPostUseCase(postRepo domain.PostRepository, verifier ...LikeVerifier) PostUseCase {
-	var v LikeVerifier
-	if len(verifier) > 0 {
-		v = verifier[0]
+// NewPostUseCase constructs an instance of PostUseCase with optional LikeVerifier and StatsEnricher.
+func NewPostUseCase(postRepo domain.PostRepository, options ...interface{}) PostUseCase {
+	uc := &postUseCase{postRepo: postRepo}
+	for _, opt := range options {
+		switch v := opt.(type) {
+		case LikeVerifier:
+			uc.likeVerifier = v
+		case StatsEnricher:
+			uc.enricher = v
+		}
 	}
-	return &postUseCase{
-		postRepo:     postRepo,
-		likeVerifier: v,
-	}
+	return uc
 }
 
 func (uc *postUseCase) CreatePost(ctx context.Context, authorID string, input CreatePostInput) (*PostOutput, error) {
@@ -87,7 +95,11 @@ func (uc *postUseCase) GetPost(ctx context.Context, postID string, viewerID stri
 		}
 	}
 
-	return toPostOutput(post, hasLiked, authorOut), nil
+	out := toPostOutput(post, hasLiked, authorOut)
+	if uc.enricher != nil {
+		uc.enricher.EnrichPosts(ctx, out)
+	}
+	return out, nil
 }
 
 func (uc *postUseCase) DeletePost(ctx context.Context, postID string, authorID string) error {
@@ -137,6 +149,10 @@ func (uc *postUseCase) ListUserPosts(ctx context.Context, username string, limit
 	output := make([]*PostOutput, 0, len(posts))
 	for _, p := range posts {
 		output = append(output, toPostOutput(p, false, authorOut))
+	}
+
+	if uc.enricher != nil && len(output) > 0 {
+		uc.enricher.EnrichPosts(ctx, output...)
 	}
 
 	return output, nextCursor, hasMore, nil
@@ -206,10 +222,18 @@ func (uc *postUseCase) GetFeed(ctx context.Context, userID string, limit int, cu
 		output = append(output, toPostOutput(p, likedMap[p.ID], authorOut))
 	}
 
+	if uc.enricher != nil && len(output) > 0 {
+		uc.enricher.EnrichPosts(ctx, output...)
+	}
+
 	return output, nextCursor, hasMore, nil
 }
 
 func toPostOutput(p *domain.Post, hasLiked bool, author *AuthorOutput) *PostOutput {
+	var uniqueViews int64
+	if p.ViewsCount > 0 {
+		uniqueViews = 1
+	}
 	return &PostOutput{
 		ID:            p.ID,
 		AuthorID:      p.AuthorID,
@@ -220,6 +244,7 @@ func toPostOutput(p *domain.Post, hasLiked bool, author *AuthorOutput) *PostOutp
 		LikesCount:    p.LikesCount,
 		CommentsCount: p.CommentsCount,
 		ViewsCount:    p.ViewsCount,
+		UniqueViews:   uniqueViews,
 		HasLiked:      hasLiked,
 		Author:        author,
 		CreatedAt:     p.CreatedAt,

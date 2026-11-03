@@ -29,6 +29,7 @@ type PostOutput struct {
 	LikesCount    int64         `json:"likes_count"`
 	CommentsCount int64         `json:"comments_count"`
 	ViewsCount    int64         `json:"views_count"`
+	UniqueViews   int64         `json:"unique_views"`
 	HasLiked      bool          `json:"has_liked"`
 	Author        *AuthorOutput `json:"author,omitempty"`
 	CreatedAt     time.Time     `json:"created_at"`

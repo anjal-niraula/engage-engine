@@ -150,3 +150,52 @@ func TestPostUseCase_CreateGetDelete(t *testing.T) {
 		t.Errorf("expected ErrPostNotFound, got %v", err)
 	}
 }
+
+type mockStatsEnricher struct{}
+
+func (m *mockStatsEnricher) EnrichPosts(ctx context.Context, posts ...*usecase.PostOutput) {
+	for _, p := range posts {
+		if p != nil {
+			p.ViewsCount = 999
+			p.UniqueViews = 42
+		}
+	}
+}
+
+func TestPostUseCase_StatsEnricher(t *testing.T) {
+	repo := newMockPostRepo()
+	repo.authors["user-1"] = &domain.Author{
+		ID:          "user-1",
+		Username:    "johndoe",
+		DisplayName: "John Doe",
+	}
+
+	uc := usecase.NewPostUseCase(repo, &mockStatsEnricher{})
+	ctx := context.Background()
+
+	caption := "Testing enricher"
+	out, err := uc.CreatePost(ctx, "user-1", usecase.CreatePostInput{
+		Caption:   &caption,
+		MediaURLs: []string{"https://cdn.example.com/img1.jpg"},
+		MediaType: "image",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating post: %v", err)
+	}
+
+	getOut, err := uc.GetPost(ctx, out.ID, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if getOut.ViewsCount != 999 || getOut.UniqueViews != 42 {
+		t.Errorf("expected views 999 and unique 42, got %d and %d", getOut.ViewsCount, getOut.UniqueViews)
+	}
+
+	listOut, _, _, err := uc.ListUserPosts(ctx, "johndoe", 10, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(listOut) != 1 || listOut[0].ViewsCount != 999 || listOut[0].UniqueViews != 42 {
+		t.Errorf("expected enriched views 999 and unique 42 in list, got %+v", listOut[0])
+	}
+}
