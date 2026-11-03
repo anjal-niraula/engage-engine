@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Instagram — EngageEngine</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23E1306C'><path d='M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z'/></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#0c1014] text-[#f5f5f5] antialiased selection:bg-pink-600 selection:text-white">
+  <!-- left icon rail, like Instagram desktop -->
+  <aside id="rail" class="fixed inset-y-0 left-0 z-30 hidden w-[72px] flex-col items-center justify-between border-r border-[#262626] py-6 sm:flex">
+    <a href="/" title="Instagram" class="rail-ico flex items-center justify-center"></a>
+    <nav id="railNav" class="flex flex-col items-center gap-7"></nav>
+    <div id="railBottom" class="flex flex-col items-center gap-7"></div>
+  </aside>
+
+  <main id="app" class="mx-auto max-w-[935px] px-4 py-8 sm:pl-[88px] lg:max-w-[1100px]"></main>
+
+  <div id="session" class="fixed bottom-6 right-6 z-30 flex items-center gap-3 cursor-default rounded-full bg-[#262626] py-3 pl-5 pr-4 text-sm shadow-xl"></div>
+  <div id="modal" class="fixed inset-0 z-40 hidden bg-black/80 backdrop-blur-sm"></div>
+  <div id="toast" class="pointer-events-none fixed bottom-6 left-1/2 z-50 hidden -translate-x-1/2 rounded-xl bg-zinc-800 border border-zinc-700 px-4 py-2.5 text-sm shadow-2xl flex items-center gap-2"></div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+    // Seeded personas for instant actor switching
+    const PERSONAS = [
+      { username: "sophia_dev", displayName: "Sophia Chen", avatarUrl: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300", bio: "Distributed systems in Go & Rust 💻\nCoffee, Linux, & dark mode.", verified: true },
+      { username: "alex_travels", displayName: "Alex Rivera", avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300", bio: "Travel photographer & nomad 🌍\nLiving out of a backpack.", verified: true },
+      { username: "chef_marco", displayName: "Marco Rossi", avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300", bio: "Michelin-trained chef 🍝\nHandcrafted pasta & Italian wine.", verified: true },
+      { username: "elena_fit", displayName: "Elena Rostova", avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300", bio: "Strength coach & endurance athlete 🏋️‍♀️\nTrain with intention.", verified: true },
+      { username: "neo_tokyo", displayName: "Kenji Sato", avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300", bio: "Tokyo night street photography 📸\nNeon & rain aesthetic.", verified: true }
+    ];
+
+    // Local user cache and authentication tokens
+    const tokens = {};
+    const userIdMap = {};
+
+    // "Login" remembers which user you picked and persists in localStorage
+    const session = {
+      get() { try { return localStorage.getItem("userId"); } catch { return null; } },
+      set(v) { try { localStorage.setItem("userId", v); } catch {} },
+      clear() { try { localStorage.removeItem("userId"); } catch {} },
+    };
+
+    function getStableDeviceId() {
+      try {
+        let did = localStorage.getItem("deviceId");
+        if (!did) {
+          did = "device_" + Math.random().toString(36).substring(2, 10);
+          localStorage.setItem("deviceId", did);
+        }
+        return did;
+      } catch {
+        return "device_client";
+      }
+    }
+
+    // 8500000 -> "8.5M"
+    const fmt = (n) => (n == null ? "0" : new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n));
+    const SYNC_MS = 1200;
+
+    // Toast helper
+    let toastTimer;
+    function toast(msg) {
+      const el = $("#toast");
+      el.textContent = msg;
+      el.classList.remove("hidden");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.add("hidden"), 2500);
+    }
+
+    const showError = (msg) => { $("#app").innerHTML = '<p class="py-20 text-center text-zinc-400">' + esc(msg) + '</p>'; };
+    const tick = '<svg viewBox="0 0 40 40" class="inline h-[18px] w-[18px] shrink-0" aria-label="Verified"><path fill="#0095f6" d="M19.998 3.094 14.638 0l-2.972 5.15H5.432v6.354L0 14.64 3.094 20 0 25.359l5.432 3.137v5.905h5.975L14.638 40l5.36-3.094L25.358 40l3.232-5.6h6.162v-6.01L40 25.359 36.905 20 40 14.641l-5.248-3.03v-6.46h-6.419L25.358 0l-5.36 3.094Zm7.415 11.225 2.254 2.287-11.43 11.5-6.835-6.93 2.244-2.258 4.587 4.581 9.18-9.18Z"/></svg>';
+
+    // SVG stroke helpers
+    const svg = (d, cls = "h-6 w-6") => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="' + cls + '">' + d + '</svg>';
+    const I = {
+      insta: '<svg viewBox="0 0 24 24" class="h-7 w-7 text-white fill-current"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>',
+      home: svg('<path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"/>'),
+      reels: svg('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m10 8.5 5 3.5-5 3.5z"/>'),
+      send: svg('<path d="M22 3 9.2 10.1M22 3l-7 18-3.8-8.9L3 8.3z"/>'),
+      search: svg('<circle cx="10.5" cy="10.5" r="7"/><path d="m21 21-5.5-5.5"/>'),
+      heart: svg('<path d="M16.8 3.5c-2 0-3.6 1-4.8 2.7C10.8 4.5 9.2 3.5 7.2 3.5A4.7 4.7 0 0 0 2.5 8.4c0 5.5 9.5 12.1 9.5 12.1s9.5-6.6 9.5-12.1a4.7 4.7 0 0 0-4.7-4.9z"/>'),
+      plus: svg('<path d="M12 4v16M4 12h16"/>'),
+      chart: svg('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 16v-4M12 16V8M16 16v-6"/>'),
+      menu: svg('<path d="M3 6h18M3 12h18M3 18h18"/>'),
+      apps: svg('<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>'),
+      grid: svg('<path d="M3 3h18v18H3zM9 3v18M15 3v18M3 9h18M3 15h18"/>'),
+      repost: svg('<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+      tagged: svg('<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="10" r="3"/><path d="M6.5 19a6 6 0 0 1 11 0"/>'),
+      comment: svg('<path d="M20.7 16.4A9 9 0 1 0 17 19.9L21 21z"/>'),
+      bookmark: svg('<path d="M19 21l-7-6-7 6V3h14z"/>'),
+      more: svg('<circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/>'),
+      close: svg('<path d="M5 5l14 14M19 5 5 19"/>', "h-7 w-7"),
+      left: svg('<path d="m15 18-6-6 6-6"/>', "h-5 w-5"),
+      right: svg('<path d="m9 18 6-6-6-6"/>', "h-5 w-5"),
+      smile: svg('<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>'),
+      eye: svg('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', "h-5 w-5"),
+      person: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', "h-5 w-5"),
+    };
+
+    const heartFill = (cls) => '<svg viewBox="0 0 24 24" class="' + cls + '" fill="currentColor"><path d="M16.8 3.5c-2 0-3.6 1-4.8 2.7C10.8 4.5 9.2 3.5 7.2 3.5A4.7 4.7 0 0 0 2.5 8.4c0 5.5 9.5 12.1 9.5 12.1s9.5-6.6 9.5-12.1a4.7 4.7 0 0 0-4.7-4.9z"/></svg>';
+    const bubbleFill = (cls) => '<svg viewBox="0 0 24 24" class="' + cls + '" fill="currentColor"><path d="M20.7 16.4A9 9 0 1 0 17 19.9L21 21z"/></svg>';
+
+    const avatarOf = (u) => {
+      const p = PERSONAS.find(x => x.username === u);
+      return (p && p.avatarUrl) || ("https://picsum.photos/seed/" + encodeURIComponent(u) + "-avatar/200/200");
+    };
+
+    const ago = (iso) => {
+      const s = Math.max(1, (Date.now() - new Date(iso || Date.now()).getTime()) / 1000);
+      for (const [n, u] of [[604800, "w"], [86400, "d"], [3600, "h"], [60, "m"]]) if (s >= n) return Math.floor(s / n) + u;
+      return Math.floor(s) + "s";
+    };
+
+    // ========================================================
+    // BACKEND API BRIDGE: Seamless connection to Engage Engine Go REST API
+    // ========================================================
+    async function ensureUserAuth(username) {
+      if (!username) return "";
+      if (tokens[username]) return tokens[username];
+
+      const persona = PERSONAS.find(p => p.username === username) || {
+        username, displayName: username, avatarUrl: avatarOf(username)
+      };
+
+      try {
+        let res = await fetch("/api/v1/users/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identity: username, password: "Password123!" })
+        });
+
+        if (res.status === 401 || !res.ok) {
+          // Auto-register if not yet created in PostgreSQL
+          await fetch("/api/v1/users/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: persona.username,
+              email: `${persona.username}@example.com`,
+              password: "Password123!",
+              display_name: persona.displayName
+            })
+          });
+
+          res = await fetch("/api/v1/users/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identity: username, password: "Password123!" })
+          });
+        }
+
+        const data = await res.json();
+        if (data.data && data.data.access_token) {
+          tokens[username] = data.data.access_token;
+          if (data.data.user) userIdMap[username] = data.data.user.id;
+          return tokens[username];
+        }
+      } catch (err) {
+        console.warn("Auth token fallback:", err);
+      }
+      return "";
+    }
+
+    async function api(path, method = "GET", payload = null) {
+      const me = session.get();
+      const token = me ? await ensureUserAuth(me) : "";
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+      if (me) headers["x-user-id"] = me;
+
+      // 1. /profiles : Return all personas with real DB stats
+      if (path === "/profiles") {
+        const items = [];
+        for (const p of PERSONAS) {
+          await ensureUserAuth(p.username);
+          try {
+            const res = await fetch(`/api/v1/users/${p.username}`);
+            const data = await res.json();
+            if (data.data) {
+              userIdMap[p.username] = data.data.id;
+              items.push({
+                username: p.username,
+                displayName: data.data.display_name || p.displayName,
+                avatarUrl: data.data.avatar_url || p.avatarUrl,
+                verified: true
+              });
+            } else {
+              items.push(p);
+            }
+          } catch (_) {
+            items.push(p);
+          }
+        }
+        return { items };
+      }
+
+      // 2. /profiles/:username/follow
+      const followMatch = path.match(/^\/profiles\/([^/]+)\/follow$/);
+      if (followMatch) {
+        const targetUsername = decodeURIComponent(followMatch[1]);
+        let targetId = userIdMap[targetUsername];
+        if (!targetId) {
+          const uRes = await fetch(`/api/v1/users/${targetUsername}`);
+          const uData = await uRes.json();
+          targetId = uData.data?.id;
+        }
+        if (!targetId) throw new Error("User ID not resolved");
+
+        const res = await fetch(`/api/v1/users/${targetId}/follow`, { method, headers });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error?.message || "Follow operation failed");
+        return body;
+      }
+
+      // 3. /profiles/:username
+      const profileMatch = path.match(/^\/profiles\/([^/]+)$/);
+      if (profileMatch) {
+        const username = decodeURIComponent(profileMatch[1]);
+        await ensureUserAuth(username);
+        let res = await fetch(`/api/v1/users/${username}`, { headers });
+        let data = await res.json();
+
+        if (res.status === 404) {
+          // Auto-register and refetch
+          await ensureUserAuth(username);
+          res = await fetch(`/api/v1/users/${username}`, { headers });
+          data = await res.json();
+        }
+
+        const u = data.data || {};
+        userIdMap[username] = u.id;
+        const p = PERSONAS.find(x => x.username === username);
+
+        return {
+          username: u.username || username,
+          displayName: u.display_name || (p && p.displayName) || username,
+          avatarUrl: u.avatar_url || (p && p.avatarUrl) || avatarOf(username),
+          bio: u.bio || (p && p.bio) || "Software Engineer & Creator ✨",
+          verified: true,
+          postsCount: Number(u.posts_count || 0),
+          followers: Number(u.followers_count || 0),
+          following: Number(u.following_count || 0),
+          isFollowing: Boolean(u.is_following)
+        };
+      }
+
+      // 4. /posts?authorId=...
+      if (path.startsWith("/posts?")) {
+        const params = new URLSearchParams(path.split("?")[1]);
+        const authorId = params.get("authorId") || "";
+        const res = await fetch(`/api/v1/users/${encodeURIComponent(authorId)}/posts?limit=24`, { headers });
+        const data = await res.json();
+        const rawPosts = data.data || [];
+
+        const items = rawPosts.map((post) => {
+          const views = Number(post.views_count || 0);
+          const uniqueViews = Number(post.unique_views != null ? post.unique_views : (views > 0 ? 1 : 0));
+          return {
+            _id: post.id,
+            authorId: post.author?.username || authorId,
+            mediaUrl: (post.media_urls && post.media_urls[0]) || "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800",
+            caption: post.caption || "",
+            type: post.media_type || "post",
+            likes: Number(post.likes_count || 0),
+            comments: Number(post.comments_count || 0),
+            totalViews: views,
+            uniqueViews: uniqueViews,
+            isLiked: Boolean(post.has_liked),
+            createdAt: post.created_at
+          };
+        });
+
+        return { items, nextCursor: null };
+      }
+
+      // 5. /posts/:id/like
+      const likeMatch = path.match(/^\/posts\/([^/]+)\/like$/);
+      if (likeMatch) {
+        const postId = likeMatch[1];
+        const res = await fetch(`/api/v1/posts/${postId}/likes`, { method, headers });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error?.message || "Like failed");
+        return body;
+      }
+
+      // 6. /posts/:id/view : Enqueues view into Redis HLL & Kafka with STABLE viewer session
+      const viewMatch = path.match(/^\/posts\/([^/]+)\/view$/);
+      if (viewMatch) {
+        const postId = viewMatch[1];
+        const stableSessionId = me ? ("user_" + me) : ("anon_" + getStableDeviceId());
+        const res = await fetch("/api/v1/views", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            post_id: postId,
+            session_id: stableSessionId,
+            duration_ms: 2500
+          })
+        });
+        return res.json().catch(() => ({ status: "queued" }));
+      }
+
+      // 7. /posts/:id/comments
+      const commentsMatch = path.match(/^\/posts\/([^/]+)\/comments/);
+      if (commentsMatch) {
+        const postId = commentsMatch[1];
+        if (method === "POST") {
+          const res = await fetch(`/api/v1/posts/${postId}/comments`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ content: payload.text || payload.content })
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error?.message || "Comment failed");
+          return body;
+        }
+
+        // GET comments
+        const res = await fetch(`/api/v1/posts/${postId}/comments?limit=30`, { headers });
+        const data = await res.json();
+        const raw = data.data || [];
+        const items = raw.map(c => ({
+          _id: c.id,
+          authorId: c.author?.username || "user",
+          text: c.content,
+          createdAt: c.created_at
+        }));
+        return { items, nextCursor: null };
+      }
+
+      // 8. /posts/:id : Get single post
+      const postMatch = path.match(/^\/posts\/([^/]+)$/);
+      if (postMatch) {
+        const postId = postMatch[1];
+        const pRes = await fetch(`/api/v1/posts/${postId}`, { headers });
+        const pData = await pRes.json();
+        const p = pData.data;
+        if (!p) throw new Error("Post not found");
+
+        let stats = { likes_count: p.likes_count, views_count: p.views_count };
+        try {
+          const sRes = await fetch(`/api/v1/posts/${postId}/stats`);
+          const sData = await sRes.json();
+          if (sData.data) stats = sData.data;
+        } catch (_) {}
+
+        const views = Number(stats.views_count != null ? stats.views_count : (p.views_count || 0));
+        const uniqueHLL = Number(stats.unique_views != null ? stats.unique_views : (views > 0 ? 1 : 0));
+
+        return {
+          _id: p.id,
+          authorId: p.author?.username || "creator",
+          mediaUrl: (p.media_urls && p.media_urls[0]) || "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800",
+          caption: p.caption || "",
+          type: p.media_type || "post",
+          likes: Number(stats.likes_count ?? p.likes_count ?? 0),
+          isLiked: Boolean(p.has_liked),
+          totalViews: views,
+          uniqueViews: uniqueHLL,
+          createdAt: p.created_at
+        };
+      }
+
+      // Default fallback
+      const res = await fetch(path, { method, headers, body: payload ? JSON.stringify(payload) : null });
+      return res.json();
+    }
+
+    // ========================================================
+    // UI RENDERING: Left rail, Session, Profile, Post Modal
+    // ========================================================
+    function renderRail() {
+      $("#rail a").innerHTML = I.insta;
+      const me = session.get();
+      $("#railNav").innerHTML = 
+        (me ? '<a href="/u/' + encodeURIComponent(me) + '" title="Home" class="text-[#f5f5f5] hover:opacity-80 transition">' + I.home + '</a>' : '<a href="/" class="text-[#f5f5f5]">' + I.home + '</a>') +
+        [I.reels, I.send, I.search, I.heart, I.plus, I.chart].map((i) => '<span class="cursor-pointer text-[#f5f5f5] hover:opacity-80 transition">' + i + '</span>').join("") +
+        (me ? '<button id="meBtn" title="You" class="transition active:scale-95"><img src="' + avatarOf(me) + '" class="h-7 w-7 rounded-full object-cover ring-2 ring-transparent hover:ring-white/40" alt="" /></button>' : "");
+      $("#railBottom").innerHTML = I.menu + I.apps;
+      if (!me) return;
+
+      let menu = $("#meMenu");
+      if (!menu) {
+        menu = document.createElement("div");
+        menu.id = "meMenu";
+        menu.className = "fixed left-[80px] z-50 hidden w-56 overflow-hidden rounded-2xl bg-[#262626] border border-[#363636] py-2 text-sm shadow-2xl";
+        document.body.appendChild(menu);
+      }
+      menu.innerHTML =
+        '<a href="/u/' + encodeURIComponent(me) + '" class="flex items-center gap-3 px-4 py-3 hover:bg-[#363636]">' + svg('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', "h-5 w-5") + 'Profile</a>' +
+        '<a href="/docs" target="_blank" class="flex items-center gap-3 px-4 py-3 hover:bg-[#363636] text-purple-400">' + svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>', "h-5 w-5") + 'OpenAPI Docs</a>' +
+        '<div class="my-1 h-px bg-[#363636]"></div>' +
+        '<button id="railLogout" class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[#363636] text-red-400">' + svg('<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>', "h-5 w-5") + 'Log out</button>';
+      
+      $("#meBtn").onclick = (e) => {
+        e.stopPropagation();
+        const r = e.currentTarget.getBoundingClientRect();
+        menu.style.top = Math.max(8, r.top - 40) + "px";
+        menu.classList.toggle("hidden");
+      };
+      $("#railLogout").onclick = () => { session.clear(); location.assign("/"); };
+      document.addEventListener("click", (e) => { if (!menu.contains(e.target)) menu.classList.add("hidden"); });
+    }
+
+    function renderSession() {
+      const user = session.get();
+      $("#session").innerHTML = user
+        ? I.send + '<span class="text-[15px] font-semibold">Messages</span>' +
+          '<span class="ml-2 flex -space-x-2">' + PERSONAS.slice(0, 3).map((p) =>
+            '<img src="' + p.avatarUrl + '" class="h-6 w-6 rounded-full border-2 border-[#262626] object-cover" alt="" />').join("") + '</span>'
+        : "";
+      $("#session").classList.toggle("hidden", !user);
+      renderRail();
+    }
+
+    // ---- / : User Picker Page ----
+    async function pickerPage() {
+      $("#app").innerHTML = '<p class="py-20 text-center text-zinc-500">Loading accounts...</p>';
+      const { items } = await api("/profiles");
+      $("#app").innerHTML =
+        '<div class="py-6 text-center">' +
+          '<h1 class="text-3xl font-bold tracking-tight">Who is this?</h1>' +
+          '<p class="mt-2 mb-8 text-sm text-zinc-400">Click any profile to log in and explore social engagement powered by Engage Engine.</p>' +
+        '</div>' +
+        '<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-4xl mx-auto">' +
+        items.map((p) =>
+          '<button data-user="' + esc(p.username) + '" class="flex items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5 text-left transition hover:border-zinc-600 hover:bg-zinc-900 group shadow-lg">' +
+            '<img src="' + esc(p.avatarUrl) + '" alt="" class="h-16 w-16 rounded-full object-cover ring-2 ring-transparent group-hover:ring-pink-500 transition" />' +
+            '<span class="min-w-0"><span class="flex items-center gap-1.5 font-semibold text-base"><span class="truncate">@' + esc(p.username) + '</span>' + (p.verified ? tick : "") + '</span>' +
+            '<span class="block truncate text-sm text-zinc-400">' + esc(p.displayName) + '</span>' +
+            '<span class="inline-block mt-1 text-[11px] text-pink-400 font-medium">Click to Login &rarr;</span></span>' +
+          '</button>').join("") +
+        '</div>';
+      
+      document.querySelectorAll("[data-user]").forEach((card) => {
+        card.onclick = () => { 
+          session.set(card.dataset.user); 
+          location.assign("/u/" + encodeURIComponent(card.dataset.user)); 
+        };
+      });
+    }
+
+    // ---- /u/:username : User Profile ----
+    async function profilePage(username) {
+      if (!session.get()) { location.replace("/"); return; }
+      $("#app").innerHTML = '<p class="py-20 text-center text-zinc-500">Loading profile...</p>';
+      let p = await api("/profiles/" + encodeURIComponent(username));
+      const isMe = session.get() === p.username;
+
+      $("#app").innerHTML =
+        '<div class="mx-auto max-w-[790px]">' +
+          '<section class="flex items-center gap-6 sm:gap-12">' +
+            '<div class="relative rounded-full p-[3px] bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600">' +
+              '<img src="' + esc(p.avatarUrl) + '" alt="" class="h-20 w-20 shrink-0 rounded-full object-cover sm:h-[160px] sm:w-[160px] border-4 border-[#0c1014]" />' +
+            '</div>' +
+            '<div class="min-w-0 flex-1">' +
+              '<div class="flex items-center gap-4 flex-wrap">' +
+                '<h1 class="flex items-center gap-2 text-xl font-normal sm:text-[26px]"><span class="truncate">@' + esc(p.username) + '</span>' + (p.verified ? tick : "") + '</h1>' +
+                (isMe 
+                  ? '<a href="/" class="px-4 py-1.5 rounded-lg bg-[#262626] hover:bg-[#363636] text-xs font-semibold">Switch Account</a>'
+                  : '<button id="follow"></button>') +
+                '<button onclick="seedVisualPosts()" class="px-3 py-1.5 rounded-lg bg-pink-600/20 hover:bg-pink-600/30 text-pink-400 text-xs font-semibold border border-pink-500/30">✨ Seed Posts</button>' +
+              '</div>' +
+              '<p class="mt-2 text-[15px] font-semibold">' + esc(p.displayName) + '</p>' +
+              '<p id="stats" class="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[15px]"></p>' +
+              (p.bio ? '<p class="mt-3 text-[14px] text-zinc-300 whitespace-pre-line">' + esc(p.bio) + '</p>' : "") +
+            '</div>' +
+          '</section>' +
+        '</div>' +
+        '<nav class="mx-auto mt-10 grid max-w-[935px] grid-cols-4 border-b border-[#262626] text-[#a8a8a8] lg:max-w-none">' +
+          '<button data-tab="post" class="flex justify-center border-b py-3 font-semibold text-xs tracking-wider uppercase" title="Posts">' + I.grid + '</button>' +
+          '<button data-tab="reel" class="flex justify-center border-b py-3 font-semibold text-xs tracking-wider uppercase" title="Reels">' + I.reels + '</button>' +
+          '<span class="flex cursor-default justify-center border-b border-transparent py-3 opacity-60" title="Reposts">' + I.repost + '</span>' +
+          '<span class="flex cursor-default justify-center border-b border-transparent py-3 opacity-60" title="Tagged">' + I.tagged + '</span>' +
+        '</nav>' +
+        '<div id="grid" class="mt-[2px] grid grid-cols-3 gap-[3px] sm:gap-4 sm:grid-cols-3"></div>' +
+        '<div class="mt-6 text-center"><button id="more" class="hidden rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium hover:bg-zinc-700">Load more</button></div>';
+
+      const paint = () => {
+        $("#stats").innerHTML =
+          '<span><b>' + Number(p.postsCount).toLocaleString() + '</b> posts</span>' +
+          '<span><b>' + fmt(p.followers) + '</b> followers</span>' +
+          '<span><b>' + fmt(p.following) + '</b> following</span>';
+        const btn = $("#follow");
+        if (btn) {
+          btn.textContent = p.isFollowing ? "Following" : "Follow";
+          btn.className = "rounded-lg px-6 py-1.5 text-xs font-semibold transition " + (p.isFollowing ? "bg-[#262626] hover:bg-[#363636] text-white" : "bg-[#0095f6] hover:bg-[#1877f2] text-white");
+        }
+      };
+      paint();
+
+      const followBtn = $("#follow");
+      if (followBtn) {
+        followBtn.onclick = async () => {
+          const was = p.isFollowing;
+          followBtn.disabled = true;
+          p.isFollowing = !was;
+          p.followers = Math.max(0, p.followers + (was ? -1 : 1));
+          paint();
+          try {
+            await api("/profiles/" + encodeURIComponent(username) + "/follow", was ? "DELETE" : "POST");
+            setTimeout(async () => { try { p = await api("/profiles/" + encodeURIComponent(username)); paint(); } catch {} }, SYNC_MS);
+          } catch (e) {
+            p.isFollowing = was;
+            p.followers = Math.max(0, p.followers + (was ? 1 : -1));
+            paint();
+            toast(e.message);
+          } finally {
+            followBtn.disabled = false;
+          }
+        };
+      }
+
+      let type = "post";
+      let cursor = null;
+
+      const stat = (icon, value, label) =>
+        '<span class="flex min-w-0 items-center gap-1.5 whitespace-nowrap" title="' + label + '">' + icon +
+          '<span class="leading-none"><b class="text-[14px] font-mono">' + fmt(value) + '</b><span class="ml-1 text-[11px] font-medium text-white/75">' + label + '</span></span></span>';
+      const eyeFill = '<svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0" fill="currentColor"><path d="M12 5C5.6 5 2 12 2 12s3.6 7 10 7 10-7 10-7-3.6-7-10-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>';
+      const usersFill = '<svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0" fill="currentColor"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7.5 0a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM1 20c0-3.9 3.6-7 8-7s8 3.1 8 7v1H1zm17.5 1v-1c0-2.4-1-4.5-2.7-5.9A6.4 6.4 0 0 1 23 20v1z"/></svg>';
+
+      // ========================================================
+      // TILE HOVER OVERLAY: Likes, Comments, Views & Unique (HLL)
+      // ========================================================
+      window.postsState = window.postsState || {};
+
+      window.updateGridTile = (postId, p) => {
+        if (!p) p = window.postsState[postId];
+        if (!p) return;
+        window.postsState[postId] = { ...(window.postsState[postId] || {}), ...p };
+        const el = document.querySelector(`[data-post="${postId}"]`);
+        if (!el) return;
+        const overlay = el.querySelector(".tile-stats-overlay");
+        if (overlay) {
+          overlay.innerHTML =
+            stat(heartFill("h-4 w-4 shrink-0 text-pink-500"), p.likes, "likes") + 
+            stat(bubbleFill("h-4 w-4 shrink-0 text-blue-400 -scale-x-100"), p.comments, "comments") +
+            stat(eyeFill, p.totalViews, "views") + 
+            stat(usersFill, p.uniqueViews, "unique");
+        }
+      };
+
+      const tile = (post) => {
+        window.postsState[post._id] = post;
+        return (
+          '<a href="/p/' + esc(post._id) + '" data-post="' + esc(post._id) + '" class="group relative block aspect-[3/4] overflow-hidden bg-[#1a1a1a] rounded-sm sm:rounded-lg cursor-pointer select-none">' +
+            '<img loading="lazy" src="' + esc(post.mediaUrl) + '" alt="' + esc(post.caption) + '" class="h-full w-full object-cover transition duration-300 group-hover:scale-105" />' +
+            '<div class="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-[2px] text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100">' +
+              '<div class="tile-stats-overlay grid grid-cols-2 gap-x-5 gap-y-3 px-3">' +
+                stat(heartFill("h-4 w-4 shrink-0 text-pink-500"), post.likes, "likes") + 
+                stat(bubbleFill("h-4 w-4 shrink-0 text-blue-400 -scale-x-100"), post.comments, "comments") +
+                stat(eyeFill, post.totalViews, "views") + 
+                stat(usersFill, post.uniqueViews, "unique") +
+              '</div>' +
+            '</div>' +
+          '</a>'
+        );
+      };
+
+      async function load(reset) {
+        if (reset) { cursor = null; $("#grid").innerHTML = ""; }
+        const q = "?authorId=" + encodeURIComponent(username) + "&type=" + type + "&limit=12" + (cursor ? "&cursor=" + cursor : "");
+        const { items, nextCursor } = await api("/posts" + q);
+        $("#grid").insertAdjacentHTML("beforeend", items.map(tile).join(""));
+        gridIds = [...document.querySelectorAll("#grid [data-post]")].map((a) => a.dataset.post);
+        cursor = nextCursor;
+        $("#more").classList.toggle("hidden", !nextCursor);
+        
+        if (reset && items.length === 0) {
+          $("#grid").innerHTML = `
+            <div class="col-span-full py-16 text-center text-zinc-500 space-y-3">
+              <p>Nothing here yet.</p>
+              <button onclick="seedVisualPosts()" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-xl text-xs font-bold transition">
+                ✨ Generate Sample Posts for @${esc(username)}
+              </button>
+            </div>
+          `;
+        }
+      }
+
+      function markTabs() {
+        document.querySelectorAll("[data-tab]").forEach((b) => {
+          const on = b.dataset.tab === type;
+          b.classList.toggle("border-white", on);
+          b.classList.toggle("border-transparent", !on);
+          b.classList.toggle("text-[#f5f5f5]", on);
+        });
+      }
+      document.querySelectorAll("[data-tab]").forEach((b) => {
+        b.onclick = () => { type = b.dataset.tab; markTabs(); load(true).catch((e) => showError(e.message)); };
+      });
+      $("#more").onclick = () => load(false).catch((e) => showError(e.message));
+      
+      $("#grid").onclick = (e) => {
+        const a = e.target.closest("[data-post]");
+        if (!a || e.metaKey || e.ctrlKey) return;
+        e.preventDefault();
+        openPost(a.dataset.post).catch((err) => toast(err.message));
+      };
+
+      // Real-time hover sync: Whenever user hovers over a post tile, refresh stats if older than 1s
+      $("#grid").addEventListener("mouseover", async (e) => {
+        const tile = e.target.closest("[data-post]");
+        if (!tile) return;
+        const postId = tile.dataset.post;
+        const now = Date.now();
+        if (tile.dataset.lastSynced && (now - Number(tile.dataset.lastSynced) < 1000)) return;
+        tile.dataset.lastSynced = String(now);
+        try {
+          const sRes = await fetch(`/api/v1/posts/${postId}/stats`);
+          const sData = await sRes.json();
+          if (sData.data) {
+            const current = window.postsState[postId] || {};
+            current.totalViews = Number(sData.data.views_count != null ? sData.data.views_count : current.totalViews || 0);
+            current.uniqueViews = Number(sData.data.unique_views != null ? sData.data.unique_views : current.uniqueViews || 0);
+            current.likes = Number(sData.data.likes_count != null ? sData.data.likes_count : current.likes || 0);
+            current.comments = Number(sData.data.comments_count != null ? sData.data.comments_count : current.comments || 0);
+            window.postsState[postId] = current;
+            if (window.updateGridTile) window.updateGridTile(postId, current);
+          }
+        } catch (_) {}
+      });
+
+      window.refreshCurrentGrid = async () => {
+        try {
+          const res = await fetch(`/api/v1/users/${encodeURIComponent(username)}/posts?limit=24`, { headers: me ? { "x-user-id": me } : {} });
+          const data = await res.json();
+          if (data && data.data) {
+            data.data.forEach(p => {
+              const current = {
+                likes: Number(p.likes_count || 0),
+                comments: Number(p.comments_count || 0),
+                totalViews: Number(p.views_count || 0),
+                uniqueViews: Number(p.unique_views != null ? p.unique_views : (p.views_count > 0 ? 1 : 0))
+              };
+              if (window.updateGridTile) window.updateGridTile(p.id, current);
+            });
+          }
+        } catch (_) {}
+      };
+
+      // Background poller to reflect terminal Kafka simulations in real-time
+      if (window.profilePollInterval) clearInterval(window.profilePollInterval);
+      window.profilePollInterval = setInterval(async () => {
+        if (document.hidden || window.profileUser !== username) return;
+        try {
+          const fresh = await api("/profiles/" + encodeURIComponent(username));
+          if (fresh && (fresh.followers !== p.followers || fresh.postsCount !== p.postsCount)) {
+            p.followers = fresh.followers;
+            p.following = fresh.following;
+            p.postsCount = fresh.postsCount;
+            paint();
+          }
+          if (window.refreshCurrentGrid) window.refreshCurrentGrid();
+        } catch (_) {}
+      }, 2000);
+
+      window.profileUser = username;
+      markTabs();
+      await load(true);
+    }
+
+    // Quick seed visual posts for current profile
+    async function seedVisualPosts() {
+      const u = window.profileUser || session.get() || "sophia_dev";
+      toast("Generating visual posts and views for @" + u + "...");
+      const samplePhotos = [
+        "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800",
+        "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800",
+        "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800",
+        "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800",
+        "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800"
+      ];
+
+      for (let i = 0; i < 3; i++) {
+        try {
+          const token = await ensureUserAuth(u);
+          const pRes = await fetch("/api/v1/posts", {
+            method: "POST",
+            headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              media_urls: [samplePhotos[i]],
+              media_type: "image",
+              caption: "Exploring distributed systems with Go, Redis HLL & Kafka! 🚀✨ #" + u,
+              location: "San Francisco, CA"
+            })
+          });
+          const pData = await pRes.json();
+          if (pData.data && pData.data.id) {
+            // Seed initial views: 12 total views across 5 unique viewers
+            for (let v = 0; v < 12; v++) {
+              await fetch("/api/v1/views", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  post_id: pData.data.id,
+                  session_id: "user_seed_viewer_" + (v % 5),
+                  duration_ms: 2500
+                })
+              });
+            }
+          }
+        } catch (e) {
+          console.warn("Post create error:", e);
+        }
+      }
+
+      toast("Posts generated!");
+      setTimeout(() => location.reload(), 1000);
+    }
+
+    // ---- Post Modal (/p/:postId) ----
+    let gridIds = [];
+    let modalToken = 0;
+
+    function closePost(push = true) {
+      $("#modal").classList.add("hidden");
+      $("#modal").innerHTML = "";
+      document.body.classList.remove("overflow-hidden");
+      if (push && location.pathname.startsWith("/p/") && window.profileUser) history.pushState({}, "", "/u/" + encodeURIComponent(window.profileUser));
+      if (window.refreshCurrentGrid) window.refreshCurrentGrid();
+    }
+
+    async function openPost(postId, push = true) {
+      const token = ++modalToken;
+      if (push) history.pushState({}, "", "/p/" + postId);
+      document.body.classList.add("overflow-hidden");
+      const m = $("#modal");
+      m.classList.remove("hidden");
+      m.innerHTML = '<div class="flex h-full items-center justify-center text-[#a8a8a8]">Loading post...</div>';
+
+      let post = await api("/posts/" + postId);
+      const author = await api("/profiles/" + encodeURIComponent(post.authorId)).catch(() => null);
+      if (token !== modalToken) return;
+      
+      const at = gridIds.indexOf(postId);
+      const prev = at > 0 ? gridIds[at - 1] : null;
+      const next = at >= 0 && at < gridIds.length - 1 ? gridIds[at + 1] : null;
+      const av = (u, src, size) => '<img src="' + esc(src || avatarOf(u)) + '" alt="" class="' + size + ' shrink-0 rounded-full object-cover" />';
+      const arrow = (id, dir, side) => id ? '<button data-go="' + id + '" class="absolute ' + side + ' top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white text-black shadow-lg">' + I[dir] + '</button>' : "";
+
+      m.innerHTML =
+        '<button id="closeModal" class="absolute right-4 top-4 z-10 text-white hover:opacity-75 transition" aria-label="Close">' + I.close + '</button>' +
+        arrow(prev, "left", "left-4") + arrow(next, "right", "right-4") +
+        '<div id="card" class="absolute inset-0 m-auto flex h-[92vh] w-[92vw] max-w-[1350px] overflow-hidden rounded-2xl bg-[#0c1014] border border-[#262626] shadow-2xl">' +
+          '<div class="flex flex-1 items-center justify-center bg-black relative select-none cursor-pointer group" id="modalMediaContainer">' +
+            '<img src="' + esc(post.mediaUrl) + '" alt="' + esc(post.caption) + '" class="max-h-full max-w-full object-contain" />' +
+          '</div>' +
+          '<div class="hidden w-[500px] shrink-0 flex-col border-l border-[#262626] md:flex">' +
+            '<div class="flex items-center gap-3 border-b border-[#262626] px-4 py-3.5">' +
+              '<a href="/u/' + encodeURIComponent(post.authorId) + '" class="flex items-center gap-3">' + av(post.authorId, author && author.avatarUrl, "h-8 w-8") +
+              '<span class="flex items-center gap-1 text-sm font-semibold">' + esc(post.authorId) + (author && author.verified ? tick : "") + '</span></a>' +
+              '<span class="ml-auto text-[#f5f5f5]">' + I.more + '</span>' +
+            '</div>' +
+            '<div class="flex-1 space-y-5 overflow-y-auto px-4 py-4 text-sm">' +
+              '<div class="flex gap-3">' + av(post.authorId, author && author.avatarUrl, "h-8 w-8") +
+                '<div><p><b class="mr-1">@' + esc(post.authorId) + '</b>' + esc(post.caption) + '</p><p class="mt-2 text-xs text-[#a8a8a8]">' + ago(post.createdAt) + '</p></div></div>' +
+              '<div id="comments" class="space-y-4"></div>' +
+              '<button id="moreComments" class="hidden w-full text-center text-[#a8a8a8]">' + I.plus + '</button>' +
+            '</div>' +
+            '<div class="border-t border-[#262626] px-4 pt-2.5 pb-2">' +
+              '<div class="flex items-center gap-4 py-1.5"><button id="like" class="transition active:scale-90" aria-label="Like"></button>' + I.comment + I.repost + I.send + '<span class="ml-auto">' + I.bookmark + '</span></div>' +
+              '<p id="nums" class="text-sm"></p>' +
+              '<p class="mt-1 text-xs text-[#a8a8a8]">' + esc(new Date(post.createdAt).toLocaleDateString("en", { month: "long", day: "numeric" })) + '</p>' +
+            '</div>' +
+            '<div class="flex items-center gap-3 border-t border-[#262626] px-4 py-3 text-sm">' + I.smile +
+              '<input id="modalCommentInput" placeholder="Add a comment..." class="flex-1 bg-transparent placeholder-[#a8a8a8] outline-none text-white text-sm" />' +
+              '<button id="modalPostCommentBtn" class="font-semibold text-[#0095f6] hover:text-[#0095f6]/80 disabled:opacity-40">Post</button></div>' +
+          '</div>' +
+        '</div>';
+
+      const paint = () => {
+        const likeEl = $("#like");
+        const numsEl = $("#nums");
+        if (likeEl) likeEl.innerHTML = post.isLiked ? heartFill("h-6 w-6 text-[#ff3040]") : I.heart;
+        if (numsEl) {
+          numsEl.innerHTML =
+            '<b>' + fmt(post.likes) + ' likes</b>' +
+            '<span class="mt-1 flex items-center gap-4 text-[#a8a8a8]">' +
+              '<span class="flex items-center gap-1" title="Total views">' + I.eye + '<b class="text-[#f5f5f5] font-mono">' + fmt(post.totalViews) + '</b> views</span>' +
+              '<span class="flex items-center gap-1" title="Unique viewers, counted with a Redis HyperLogLog">' + I.person + '<b class="text-[#f5f5f5] font-mono">' + fmt(post.uniqueViews) + '</b> unique</span>' +
+            '</span>';
+        }
+        if (window.updateGridTile) window.updateGridTile(postId, post);
+      };
+      paint();
+
+      const refresh = async () => { 
+        try { 
+          post = await api("/posts/" + postId); 
+          if (token === modalToken) paint(); 
+        } catch {} 
+      };
+
+      // Like toggle with Cuckoo Filter & Kafka updates
+      $("#like").onclick = async () => {
+        const btn = $("#like");
+        const was = post.isLiked;
+        btn.disabled = true;
+        post.isLiked = !was;
+        post.likes = Math.max(0, (post.likes ?? 0) + (was ? -1 : 1));
+        paint();
+        try {
+          await api("/posts/" + postId + "/like", was ? "DELETE" : "POST");
+          setTimeout(refresh, SYNC_MS);
+        } catch (e) {
+          post.isLiked = was;
+          post.likes = Math.max(0, post.likes + (was ? 1 : -1));
+          paint();
+          toast(e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      };
+
+      // Double-click media to like
+      $("#modalMediaContainer").ondblclick = () => {
+        if (!post.isLiked) $("#like").click();
+      };
+
+      $("#closeModal").onclick = () => closePost();
+      m.onclick = (e) => { if (e.target === m) closePost(); };
+      m.querySelectorAll("[data-go]").forEach((b) => {
+        b.onclick = () => { history.replaceState({}, "", "/p/" + b.dataset.go); openPost(b.dataset.go, false).catch((e) => toast(e.message)); };
+      });
+
+      // Submit comment
+      async function submitComment() {
+        const input = $("#modalCommentInput");
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = "";
+        try {
+          await api("/posts/" + postId + "/comments", "POST", { text });
+          toast("Comment posted! 💬");
+          await loadComments(true);
+        } catch (err) {
+          toast(err.message);
+        }
+      }
+      $("#modalPostCommentBtn").onclick = submitComment;
+      $("#modalCommentInput").onkeydown = (e) => { if (e.key === "Enter") submitComment(); };
+
+      // Load comments
+      let cursor = null;
+      async function loadComments(reset) {
+        if (reset) $("#comments").innerHTML = "";
+        const { items, nextCursor } = await api("/posts/" + postId + "/comments?limit=15" + (cursor ? "&cursor=" + cursor : ""));
+        if (token !== modalToken) return;
+        $("#comments").insertAdjacentHTML("beforeend", items.map((c) =>
+          '<div class="flex gap-3">' + av(c.authorId, null, "h-8 w-8") +
+            '<div class="flex-1"><p><b class="mr-1">@' + esc(c.authorId) + '</b>' + esc(c.text) + '</p>' +
+            '<p class="mt-1.5 text-xs text-[#a8a8a8]">' + ago(c.createdAt) + '<span class="ml-3 font-semibold cursor-pointer">Reply</span></p></div>' +
+            '<span class="pt-1 text-[#a8a8a8]">' + svg('<path d="M16.8 3.5c-2 0-3.6 1-4.8 2.7C10.8 4.5 9.2 3.5 7.2 3.5A4.7 4.7 0 0 0 2.5 8.4c0 5.5 9.5 12.1 9.5 12.1s9.5-6.6 9.5-12.1a4.7 4.7 0 0 0-4.7-4.9z"/>', "h-3 w-3") + '</span>' +
+          '</div>').join(""));
+        cursor = nextCursor;
+        $("#moreComments").classList.toggle("hidden", !nextCursor);
+      }
+      $("#moreComments").onclick = () => loadComments(false).catch((e) => toast(e.message));
+      await loadComments(true);
+
+      // Track view: Kafka event dispatched & Redis HyperLogLog updated
+      api("/posts/" + postId + "/view", "POST").then(() => setTimeout(refresh, SYNC_MS)).catch(() => {});
+    }
+
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#modal").classList.contains("hidden")) closePost(); });
+
+    // ---- Client-Side Router ----
+    renderSession();
+    const userMatch = location.pathname.match(/^\/u\/([^/]+)\/?$/);
+    const postMatch = location.pathname.match(/^\/p\/([0-9a-fA-F-]+)\/?$/);
+
+    const postFirst = async (id) => {
+      const post = await api("/posts/" + id);
+      await profilePage(post.authorId);
+      await openPost(id, false);
+    };
+
+    let page = Promise.resolve();
+    if (!userMatch && !postMatch) {
+      page = pickerPage();
+    } else if (!session.get()) {
+      location.replace("/");
+    } else {
+      page = userMatch ? profilePage(decodeURIComponent(userMatch[1])) : postFirst(postMatch[1]);
+    }
+    page.catch((e) => showError(e.message));
+
+    window.addEventListener("popstate", () => {
+      const id = location.pathname.match(/^\/p\/([0-9a-fA-F-]+)\/?$/);
+      if (id) openPost(id[1], false).catch((e) => toast(e.message));
+      else closePost(false);
+    });
+  </script>
+</body>
+</html>

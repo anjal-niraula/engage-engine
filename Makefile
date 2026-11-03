@@ -4,8 +4,12 @@ APP_NAME     := engage-engine
 BIN_DIR      := bin
 API_BIN      := $(BIN_DIR)/api
 WORKER_BIN   := $(BIN_DIR)/worker
+SEED_BIN     := $(BIN_DIR)/seed
+SIMULATE_BIN := $(BIN_DIR)/simulate
 API_ENTRY    := cmd/api/main.go
 WORKER_ENTRY := cmd/worker/main.go
+SEED_ENTRY   := cmd/seed/main.go
+SIMULATE_ENTRY := cmd/simulate/main.go
 
 .PHONY: all
 all: clean fmt vet test build ## Format, vet, test, and build all binaries
@@ -18,7 +22,7 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: build
-build: build-api build-worker ## Build all service binaries
+build: build-api build-worker build-seed build-simulate ## Build all service binaries
 
 .PHONY: build-api
 build-api: ## Build the API server binary
@@ -31,6 +35,26 @@ build-worker: ## Build the worker service binary
 	@mkdir -p $(BIN_DIR)
 	@echo "Building Worker service..."
 	go build -o $(WORKER_BIN) $(WORKER_ENTRY)
+
+.PHONY: build-seed
+build-seed: ## Build the seed & simulation CLI binary
+	@mkdir -p $(BIN_DIR)
+	@echo "Building Seed binary..."
+	go build -o $(SEED_BIN) $(SEED_ENTRY)
+
+.PHONY: build-simulate
+build-simulate: ## Build high-throughput load simulator binary
+	@mkdir -p $(BIN_DIR)
+	@echo "Building Simulator binary..."
+	go build -o $(SIMULATE_BIN) $(SIMULATE_ENTRY)
+
+.PHONY: seed
+seed: ## Seed database and simulate live social engagement
+	go run $(SEED_ENTRY)
+
+.PHONY: simulate
+simulate: ## Run high-throughput simulation (views, comments, Kafka & Redis HLL)
+	go run $(SIMULATE_ENTRY) -views 2000 -comments 200 -likes 50
 
 .PHONY: run-api
 run-api: ## Run the HTTP API server directly

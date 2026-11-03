@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	analyticsHandler "github.com/anjal-niraula/engage-engine/internal/modules/analytics/handler"
-	analyticsRepo "github.com/anjal-niraula/engage-engine/internal/modules/analytics/repository"
-	analyticsUsecase "github.com/anjal-niraula/engage-engine/internal/modules/analytics/usecase"
+	viewsHandler "github.com/anjal-niraula/engage-engine/internal/modules/views/handler"
+	viewsRepo "github.com/anjal-niraula/engage-engine/internal/modules/views/repository"
+	viewsUsecase "github.com/anjal-niraula/engage-engine/internal/modules/views/usecase"
 	commentHandler "github.com/anjal-niraula/engage-engine/internal/modules/comment/handler"
 	commentRepo "github.com/anjal-niraula/engage-engine/internal/modules/comment/repository"
 	commentUsecase "github.com/anjal-niraula/engage-engine/internal/modules/comment/usecase"
@@ -35,6 +35,8 @@ import (
 	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
 	"github.com/anjal-niraula/engage-engine/internal/platform/postgres"
 	"github.com/anjal-niraula/engage-engine/internal/platform/server"
+	"github.com/anjal-niraula/engage-engine/internal/platform/web"
+	"github.com/anjal-niraula/engage-engine/internal/platform/worker"
 	"github.com/anjal-niraula/engage-engine/internal/shared/cuckoo"
 	sharedMw "github.com/anjal-niraula/engage-engine/internal/shared/middleware"
 )
@@ -71,6 +73,9 @@ func main() {
 	// Register interactive API Documentation (/docs and /docs/openapi.json)
 	docs.RegisterRoutes(mux)
 
+	// Register Instagram Web UI (/ and /app)
+	web.RegisterRoutes(mux)
+
 	// Setup application modules if database is connected
 	if srv.DB != nil && srv.DB.Pool != nil {
 		if cfg.Primary.Env == "local" || cfg.Primary.Env == "development" {
@@ -102,8 +107,9 @@ func main() {
 			return likedMap[postID], nil
 		})
 
-		// 2. Post Module (uses likeChecker to bypass 95%+ of DB queries on feeds)
-		postUseCase := postUsecase.NewPostUseCase(postRepository, likeChecker)
+		// 2. Post Module (uses likeChecker for cache & Redis enricher for real-time HLL stats)
+		statsEnricher := postUsecase.NewRedisStatsEnricher(srv.Redis)
+		postUseCase := postUsecase.NewPostUseCase(postRepository, likeChecker, statsEnricher)
 		postHTTPHandler := postHandler.NewPostHandler(postUseCase)
 		postHandler.RegisterRoutes(mux, postHTTPHandler, requireAuth, optionalAuth)
 
@@ -131,17 +137,22 @@ func main() {
 		notificationHTTPHandler := notificationHandler.NewNotificationHandler(notificationUseCase, &log)
 		notificationHandler.RegisterRoutes(mux, notificationHTTPHandler, requireAuth, optionalAuth)
 
-		// 7. Analytics & Views Module
-		analyticsRepository := analyticsRepo.NewAnalyticsRepository(srv.DB.Pool, srv.Redis)
-		var kafkaViewProducer *analyticsRepo.KafkaViewProducer
+		// 7. Views Module (Impressions, HyperLogLog & Realtime Counters)
+		viewsRepository := viewsRepo.NewViewRepository(srv.DB.Pool, srv.Redis)
+		var kafkaViewProducer *viewsRepo.KafkaViewProducer
 		if srv.Kafka != nil {
-			kafkaViewProducer = analyticsRepo.NewKafkaViewProducer(srv.Kafka, "engage.views")
+			kafkaViewProducer = viewsRepo.NewKafkaViewProducer(srv.Kafka, "engage.views")
 		}
-		analyticsUseCase := analyticsUsecase.NewAnalyticsUseCase(analyticsRepository, kafkaViewProducer)
-		analyticsHTTPHandler := analyticsHandler.NewAnalyticsHandler(analyticsUseCase, &log)
-		analyticsHandler.RegisterRoutes(mux, analyticsHTTPHandler, requireAuth, optionalAuth)
+		viewsUseCase := viewsUsecase.NewViewUseCase(viewsRepository, kafkaViewProducer)
+		viewsHTTPHandler := viewsHandler.NewViewsHandler(viewsUseCase, &log)
+		viewsHandler.RegisterRoutes(mux, viewsHTTPHandler, requireAuth, optionalAuth)
 
-		log.Info().Msg("all core modules successfully registered (user, post, like, follow, comment, notification, analytics)")
+		log.Info().Msg("all core modules successfully registered (user, post, like, follow, comment, notification, views)")
+
+		// Automatic background worker: flushes Kafka batches to PostgreSQL in the background
+		if srv.Kafka != nil {
+			worker.StartAllConsumers(context.Background(), srv, &log)
+		}
 	}
 
 	srv.SetupHTTPServer(mux)

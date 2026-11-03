@@ -5,8 +5,12 @@ vars:
   BIN_DIR: bin
   API_BIN: '{{.BIN_DIR}}/api'
   WORKER_BIN: '{{.BIN_DIR}}/worker'
+  SEED_BIN: '{{.BIN_DIR}}/seed'
+  SIMULATE_BIN: '{{.BIN_DIR}}/simulate'
   API_ENTRY: cmd/api/main.go
   WORKER_ENTRY: cmd/worker/main.go
+  SEED_ENTRY: cmd/seed/main.go
+  SIMULATE_ENTRY: cmd/simulate/main.go
 
 dotenv: ['.env', '.env.example']
 
@@ -28,7 +32,7 @@ tasks:
 
   build:
     desc: Build all service binaries
-    deps: [build-api, build-worker]
+    deps: [build-api, build-worker, build-seed, build-simulate]
 
   build-api:
     desc: Build the API server binary
@@ -53,6 +57,38 @@ tasks:
     cmds:
       - mkdir -p {{.BIN_DIR}}
       - go build -o {{.WORKER_BIN}} {{.WORKER_ENTRY}}
+
+  build-seed:
+    desc: Build the seed & simulation CLI binary
+    generates:
+      - '{{.SEED_BIN}}'
+    sources:
+      - 'cmd/seed/**/*.go'
+      - 'go.mod'
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -o {{.SEED_BIN}} {{.SEED_ENTRY}}
+
+  build-simulate:
+    desc: Build the high-throughput load simulator binary
+    generates:
+      - '{{.SIMULATE_BIN}}'
+    sources:
+      - 'cmd/simulate/**/*.go'
+      - 'go.mod'
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -o {{.SIMULATE_BIN}} {{.SIMULATE_ENTRY}}
+
+  seed:
+    desc: Seed database and simulate live social engagement
+    cmds:
+      - go run {{.SEED_ENTRY}}
+
+  simulate:
+    desc: Run high-throughput simulation (views, comments, Kafka & Redis HLL)
+    cmds:
+      - go run {{.SIMULATE_ENTRY}} -views 2000 -comments 200 -likes 50
 
   run-api:
     desc: Run the HTTP API server directly

@@ -5,9 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/anjal-niraula/engage-engine/internal/platform/config"
 	"github.com/anjal-niraula/engage-engine/internal/platform/logger"
+	"github.com/anjal-niraula/engage-engine/internal/platform/server"
+	"github.com/anjal-niraula/engage-engine/internal/platform/worker"
 )
 
 func main() {
@@ -17,27 +20,38 @@ func main() {
 		panic("failed to load config: " + err.Error())
 	}
 
-	// 2. Initialize logger
+	// 2. Initialize logger service
 	loggerService := logger.NewLoggerService(cfg.Observability)
 	defer loggerService.Shutdown()
 
 	log := logger.NewLoggerWithService(cfg.Observability, loggerService)
 	log.Info().
-		Str("service", cfg.Observability.ServiceName).
+		Str("service", cfg.Observability.ServiceName+"-worker").
 		Str("env", cfg.Primary.Env).
-		Msg("starting background worker service")
+		Msg("starting standalone background worker service (Kafka Micro-Batch Consumer)")
 
-	// 3. Set up root context with graceful cancellation
+	// 3. Initialize server platform (PostgreSQL, Redis, Kafka)
+	srv, err := server.New(cfg, &log, loggerService)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to initialize worker server dependencies")
+	}
+
+	// 4. Set up root context with graceful cancellation
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	log.Info().Msg("worker service initialized and listening for tasks/events")
+	if srv.Kafka == nil {
+		log.Warn().Msg("Kafka is not connected, worker running in idle standby mode")
+		<-ctx.Done()
+		return
+	}
 
-	// 4. Worker event loop / wait for cancellation
+	// 5. Start Kafka Micro-Batch Consumers for Views, Follows, and Likes
+	worker.StartAllConsumers(ctx, srv, &log)
+
+	// 6. Wait for shutdown signal
 	<-ctx.Done()
-
 	log.Info().Msg("received shutdown signal: draining background worker tasks...")
-
-	// In-flight background consumer draining will coordinate here
+	time.Sleep(500 * time.Millisecond)
 	log.Info().Msg("worker service stopped cleanly")
 }
